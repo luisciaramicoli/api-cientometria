@@ -857,7 +857,7 @@ async function uploadToGsheets(sheets, data) {
 
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
-      range: `'${SHEET_NAME}'!A1`,
+      range: `'${SHEET_NAME}'`,
       valueInputOption: "USER_ENTERED",
       resource: { values: finalValues },
     });
@@ -878,27 +878,27 @@ async function manualInsert(data) {
 
   const rowToUpload = {
     "Autor(es)": data["Autor(es)"],
-    Titulo: data.Titulo,
-    Subtítulo: data.Subtítulo,
-    Ano: data.Ano,
+    "Título": data.Titulo,
+    "Subtítulo": data.Subtítulo,
+    "Ano": data.Ano,
     "Número de citações recebidas (Google Scholar)":
       data["Número de citações recebidas (Google Scholar)"],
     "Palavras-chave": data["Palavras-chave"],
-    Resumo: data.Resumo,
+    "Resumo": data.Resumo,
     "Tipo de documento": data["Tipo de documento"],
-    Editora: data.Editora,
-    Instituição: data.Instituição,
-    Local: data.Local,
+    "Editora": data.Editora,
+    "Instituição": data.Instituição,
+    "Local": data.Local,
     "Tipo de trabalho": data["Tipo de trabalho"],
     "Título do periódico": data["Título do periódico"],
     "Quartil do periódico": data["Quartil do periódico"],
-    Volume: data.Volume,
+    "Volume": data.Volume,
     "Número/fascículo": data["Número/fascículo"],
-    Páginas: data.Páginas,
-    DOI: data.DOI,
-    Numeração: data.Numeração,
-    Qualis: data.Qualis,
-    CATEGORIA: data.CATEGORIA,
+    "Páginas": data.Páginas,
+    "DOI": data.DOI,
+    "Numeração": data.Numeração,
+    "Qualis": data.Qualis,
+    "CATEGORIA": data.CATEGORIA,
     "Caracteristicas do solo e região (escrever)":
       data["Caracteristicas do solo e região (escrever)"],
     "ferramentas e técnicas (seleção)":
@@ -910,7 +910,7 @@ async function manualInsert(data) {
     "culturas presentes (seleção)": data["culturas presentes (seleção)"],
     "FEEDBACK DO CURADOR (escrever)": data["FEEDBACK DO CURADOR (escrever)"],
     "URL DO DOCUMENTO": data.pub_url,
-    work_id: data.id || `manual-${Date.now()}`,
+    "work_id": data.id || `manual-${Date.now()}`,
   };
 
   const success = await uploadToGsheets(sheets, [rowToUpload]);

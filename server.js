@@ -325,7 +325,7 @@ app.post("/api/manual-insert", authenticateToken, upload.single('file'), async (
 
     // Expected keys as used by manualInsert (source of truth)
     const expectedKeys = [
-      'Autor(es)', 'Titulo', 'Subtítulo', 'Ano', 'Número de citações recebidas (Google Scholar)',
+      'Autor(es)', 'Título', 'Subtítulo', 'Ano', 'Número de citações recebidas (Google Scholar)',
       'Palavras-chave', 'Resumo', 'Tipo de documento', 'Editora', 'Instituição', 'Local', 'Tipo de trabalho',
       'Título do periódico', 'Quartil do periódico', 'Volume', 'Número/fascículo', 'Páginas', 'DOI', 'Numeração', 'Qualis', 'pub_url'
     ];
@@ -338,10 +338,10 @@ app.post("/api/manual-insert", authenticateToken, upload.single('file'), async (
     });
 
     // Validação simples dos dados recebidos (usando finalData)
-    if (!finalData.Titulo || !finalData['Autor(es)'] || !finalData.Ano || !finalData['Título do periódico'] && !finalData['Título do periódico']) {
+    if (!finalData['Título'] || !finalData['Autor(es)'] || !finalData.Ano || !finalData['Título do periódico'] && !finalData['Título do periódico']) {
       // Note: some environments may lose accents; also accept 'Titulo' and 'Titulo do periodico' etc.
-      const hasTitle = finalData.Titulo || finalData['Título do periódico'] || finalData['Título do periódico'];
-      if (!finalData.Titulo || !finalData['Autor(es)'] || !finalData.Ano || !hasTitle) {
+      const hasTitle = finalData['Título'] || finalData['Título do periódico'] || finalData['Título do periódico'];
+      if (!finalData['Título'] || !finalData['Autor(es)'] || !finalData.Ano || !hasTitle) {
         return res.status(400).json({ error: "Campos obrigatórios (Título, Autor(es), Ano, Título do periódico) não preenchidos." });
       }
     }
