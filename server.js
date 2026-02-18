@@ -288,7 +288,7 @@ app.post("/api/manual-insert", authenticateToken, upload.single('file'), async (
 
     // If a file was uploaded, save to Drive and set pub_url
     if (req.file) {
-      const tmpDir = path.join(__dirname, 'temp_uploads');
+      const tmpDir = path.join('/tmp', 'temp_uploads');
       await fs.mkdir(tmpDir, { recursive: true });
       const originalName = req.file.originalname || `upload-${Date.now()}.pdf`;
       const tmpPath = path.join(tmpDir, `${Date.now()}-${originalName}`);
