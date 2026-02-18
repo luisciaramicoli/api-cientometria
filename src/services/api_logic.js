@@ -120,11 +120,12 @@ function colIndexToA1(colIndex) {
   return s;
 }
 
-async function callCustomCuradorApi(pdfBuffer, headers) {
+async function callCustomCuradorApi(pdfBuffer, headers, category = null) {
   const payload = {
     encoded_content: pdfBuffer.toString("base64"),
     content_type: "pdf",
     headers,
+    category,
   };
   try {
     const res = await axios.post(`${API_BASE_URL}/curadoria`, payload, {
@@ -296,9 +297,15 @@ async function processarUmaLinha(
     );
     const pdfBuffer = Buffer.from(fileResponse);
 
+    // Identifica a categoria da coluna AJ (índice 35) ou pelo header "CATEGORIA"
+    let colCategoriaIndex = headers.indexOf("CATEGORIA");
+    if (colCategoriaIndex === -1) colCategoriaIndex = 35; // Fallback para AJ
+    const categoryValue = row[colCategoriaIndex] || null;
+
     const extractedData = await callCustomCuradorApi(
       pdfBuffer,
       llmOutputHeaders,
+      categoryValue
     );
 
     // Prepare data for updating LLM output columns
@@ -574,6 +581,60 @@ async function executarCuradoriaLinhaUnica(rowNumber) {
   };
 }
 
+async function executarCategorizacaoLinhaUnica(rowNumber) {
+  if (rowNumber < 2) throw new Error("Row number must be 2 or greater.");
+  const { sheets, drive } = await getAuthenticatedServices();
+
+  const { data } = await sheets.spreadsheets.values.batchGet({
+    spreadsheetId: SPREADSHEET_ID,
+    ranges: [`'${SHEET_NAME}'!1:1`, `'${SHEET_NAME}'!A${rowNumber}:ZZ${rowNumber}`],
+  });
+
+  if (!data.valueRanges || data.valueRanges.length < 2 || !data.valueRanges[1].values) {
+    throw new Error("Não foi possível encontrar a linha solicitada.");
+  }
+
+  const headers = data.valueRanges[0].values[0];
+  const row = data.valueRanges[1].values[0];
+
+  const colUrlDocumentoIndex = headers.indexOf("URL DO DOCUMENTO");
+  let colCategoriaIndex = headers.indexOf("CATEGORIA");
+  if (colCategoriaIndex === -1) colCategoriaIndex = 35; // Fallback
+
+  const urlValue = row[colUrlDocumentoIndex] || "";
+  const fileId = getDriveIdFromUrl(urlValue);
+
+  if (!fileId) throw new Error("Este artigo não possui um documento válido para categorização.");
+
+  const { data: fileResponse } = await drive.files.get(
+    { fileId, alt: "media" },
+    { responseType: "arraybuffer" }
+  );
+  const pdfBuffer = Buffer.from(fileResponse);
+
+  const category = await callCategorizationApi(pdfBuffer);
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: SPREADSHEET_ID,
+    range: `'${SHEET_NAME}'!${colIndexToA1(colCategoriaIndex)}${rowNumber}`,
+    valueInputOption: "USER_ENTERED",
+    resource: { values: [[category]] },
+  });
+
+  const updatedRow = [...row];
+  updatedRow[colCategoriaIndex] = category;
+
+  const articleObject = { __row_number: rowNumber };
+  headers.forEach((h, i) => {
+    articleObject[h] = updatedRow[i] || "";
+  });
+
+  return {
+    message: `Artigo da linha ${rowNumber} categorizado como ${category}.`,
+    updatedArticle: articleObject,
+  };
+}
+
 async function processDriveFolderForBatchInsert(folderId) {
   const { sheets, drive } = await getAuthenticatedServices();
 
@@ -837,6 +898,7 @@ async function manualInsert(data) {
     DOI: data.DOI,
     Numeração: data.Numeração,
     Qualis: data.Qualis,
+    CATEGORIA: data.CATEGORIA,
     "Caracteristicas do solo e região (escrever)":
       data["Caracteristicas do solo e região (escrever)"],
     "ferramentas e técnicas (seleção)":
@@ -1098,6 +1160,7 @@ module.exports = {
   getCuratedArticles,
   executarCuradoriaLocalmente,
   executarCuradoriaLinhaUnica,
+  executarCategorizacaoLinhaUnica,
   deleteRow,
   deleteUnavailableRows,
   manualInsert, // Exporta a nova função

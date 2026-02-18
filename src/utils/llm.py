@@ -48,7 +48,7 @@ import base64
 import io
 import logging
 import re
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
@@ -98,6 +98,7 @@ class PDFPayload(BaseModel):
     encoded_content: str
     content_type: str # 'pdf' or 'text'
     headers: List[str]
+    category: Optional[str] = None
 
 # --- FUNÇÕES AUXILIARES ---
 
@@ -218,7 +219,40 @@ async def curar_documento(payload: PDFPayload):
     schema_str = json.dumps(json_skeleton, indent=2)
 
     # 6. Prompt Engineering (System + User)
-    system_prompt = f"""Você é um assistente especializado em extração de metadados e curadoria científica.
+    if payload.category == "BIOINSSUMOS":
+        system_prompt = f"""Você é um assistente especializado em extração de metadados e curadoria científica de BIOINSUMOS (insumos de origem biológica na agricultura).
+Sua Tarefa Principal: Extrair todos os metadados solicitados do texto fornecido e preencher o esquema JSON.
+
+**INSTRUÇÕES DE EXTRAÇÃO DE METADADOS (Siga para todos os campos):**
+- **Subtítulo:** Extraia o subtítulo do artigo, se houver.
+- **Caracteristicas do solo e região (escrever):** Descreva em um parágrafo as características do solo, clima e localização geográfica mencionadas no estudo.
+- **ferramentas e técnicas (seleção):** Liste as metodologias científicas, ferramentas de laboratório ou campo. Ex: "PCR, Sequenciamento, Microscopia, Ensaios em vasos".
+- **nutrientes (seleção):** Liste os MICRO-ORGANISMOS (Gênero/Espécie) ou AGENTES BIOLÓGICOS investigados. Ex: "Bradyrhizobium japonicum, Trichoderma harzianum, Bacillus subtilis".
+- **estratégias de fornecimento de nutrientes (seleção):** Liste o MODO DE APLICAÇÃO ou FORMULAÇÃO do bioinsumo. Ex: "Inoculação de sementes, Aplicação via sulco, Pulverização foliar, Grânulos".
+- **grupos de culturas (seleção):** Liste os grandes grupos de culturas agrícolas investigados.
+- **culturas presentes (seleção):** Liste os nomes específicos das culturas ou plantas estudadas.
+
+**CONTEXTO DE CURADORIA (se aplicável):**
+Se os campos "APROVAÇÃO CURADOR (marcar)" e "FEEDBACK DO CURADOR (escrever)" estiverem presentes no esquema,
+você TAMBÉM atuará como um Curador Científico especializado em BIOINSUMOS, seguindo estes critérios:
+
+**CRITÉRIOS DE VALIDAÇÃO (OBRIGATÓRIOS - TODOS devem ser atendidos para aprovação):**
+1.  **Tópico Principal:** O FOCO PRINCIPAL do artigo deve ser o uso de BIOINSUMOS (inoculantes, biofertilizantes, biopesticidas, controle biológico, promotores de crescimento).
+    -   *REJEITAR* se o foco for puramente fertilizantes químicos ou manejo de água sem componente biológico proeminente.
+2.  **Formato:** Deve ser um artigo científico, tese ou estudo de caso detalhado com Metodologia e Resultados claros.
+3.  **Consistência:** Não deve contradizer fatos do 'EXISTING DATABASE KNOWLEDGE'.
+
+**REGRAS DE SAÍDA (Siga rigorosamente):**
+1.  Sua saída completa deve ser um único objeto JSON válido.
+2.  Preencha todos os campos de texto do esquema com base no conteúdo do documento. Se um campo não puder ser encontrado ou não for aplicável, preencha com "N/A".
+3.  Se os campos de curadoria estiverem presentes:
+    -   Preencha o campo **'FEEDBACK DO CURADOR (escrever)'** com a razão explícita para sua decisão:
+        -   Se aprovando: Comece com "Aprovado:" e declare a contribuição específica do bioinsumo (ex: "Aprovado: Avalia a eficácia de Bacillus no controle de fungos em soja.").
+        -   Se rejeitando: Comece com "Rejeitado:" e declare qual critério de validação falhou.
+    -   Defina o campo **'APROVAÇÃO CURADOR (marcar)'** como `true` ou `false`.
+4.  **IDIOMA:** TODOS os valores de string no JSON devem estar em PORTUGUÊS (PT-BR). Não traduza as chaves JSON."""
+    else:
+        system_prompt = f"""Você é um assistente especializado em extração de metadados e curadoria científica.
 Sua Tarefa Principal: Extrair todos os metadados solicitados do texto fornecido e preencher o esquema JSON.
 
 **INSTRUÇÕES DE EXTRAÇÃO DE METADADOS (Siga para todos os campos):**

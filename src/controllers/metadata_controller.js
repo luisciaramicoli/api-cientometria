@@ -22,6 +22,7 @@ const ALL_METADATA_FIELDS = [
     "DOI",
     "Numeração",
     "Qualis",
+    "CATEGORIA",
     "Caracteristicas do solo e região (escrever)",
     "ferramentas e técnicas (seleção)",
     "nutrientes (seleção)",
@@ -81,6 +82,30 @@ async function getCrossrefMetadata(query) {
 
 
 /**
+ * Chama o serviço de categorização do LLM.
+ * @param {Buffer} pdfBuffer - O buffer do arquivo PDF.
+ * @returns {Promise<string>} - A categoria identificada.
+ */
+async function callCategorizationApi(pdfBuffer) {
+    const payload = {
+        encoded_content: pdfBuffer.toString("base64"),
+        content_type: "pdf",
+        headers: [], // Requerido pelo modelo Pydantic
+    };
+    try {
+        const res = await axios.post('https://curadoria-llm-curadoria.hf.space/categorize', payload, {
+            timeout: 60000,
+            headers: { "Content-Type": "application/json" },
+        });
+        return res.data.category;
+    } catch (error) {
+        console.error("Erro na API de Categorização:", error.message);
+        return "N/A";
+    }
+}
+
+
+/**
  * Chama o serviço LLM para extrair metadados adicionais.
  * @param {string} documentText - O texto completo do documento (ou o título, se não houver PDF).
  * @returns {object} - Os metadados extraídos pelo LLM.
@@ -105,7 +130,7 @@ async function callLLMService(documentText, file = null) {
         const llmPayload = {
             encoded_content: base64_content,
             content_type: content_type,
-            headers: ALL_METADATA_FIELDS,
+            headers: ALL_METADATA_FIELDS.filter(f => f !== "CATEGORIA"), // Não envia CATEGORIA para o /curadoria
         };
 
         console.log(`Chamando o serviço LLM com content_type: ${content_type} em ${'https://curadoria-llm-curadoria.hf.space/curadoria'}...`);
@@ -139,6 +164,7 @@ async function runExtractionAgent(query, documentText = null, file = null) {
         let combinedData = ALL_METADATA_FIELDS.reduce((acc, field) => ({ ...acc, [field]: "" }), {});
         let crossrefData = {};
         let llmResult = {};
+        let category = "N/A";
 
         if (query) {
             crossrefData = await getCrossrefMetadata(query);
@@ -147,6 +173,12 @@ async function runExtractionAgent(query, documentText = null, file = null) {
             } else {
                 console.warn(`Crossref metadata search failed for query "${query}": ${crossrefData.error}`);
             }
+        }
+
+        // Categorização se houver arquivo
+        if (file && file.buffer) {
+            category = await callCategorizationApi(file.buffer);
+            combinedData["CATEGORIA"] = category;
         }
 
         // If documentText is available, call the LLM service for richer extraction
@@ -212,6 +244,18 @@ async function runExtractionAgent(query, documentText = null, file = null) {
                 console.warn(`LLM service call failed: ${llmResult.error}`);
             }
         }
+
+        if (Object.keys(combinedData).every(key => combinedData[key] === "")) {
+            return { error: "Não foi possível encontrar nenhum metadado para a consulta fornecida de nenhuma fonte." };
+        }
+
+        return combinedData;
+
+    } catch (e) {
+        console.error(`Erro na execução do agente: ${e.message}`);
+        throw new Error(`Ocorreu um erro durante a extração de metadados: ${e.message}`);
+    }
+}
 
         if (Object.keys(combinedData).every(key => combinedData[key] === "")) {
             return { error: "Não foi possível encontrar nenhum metadado para a consulta fornecida de nenhuma fonte." };

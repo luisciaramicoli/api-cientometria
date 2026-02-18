@@ -9,6 +9,7 @@ const {
   getCuratedArticles,
   executarCuradoriaLocalmente,
   executarCuradoriaLinhaUnica,
+  executarCategorizacaoLinhaUnica,
   deleteRow,
   deleteUnavailableRows,
   manualInsert,
@@ -173,6 +174,20 @@ app.post("/api/trigger-curation-single", authenticateToken, async (req, res) => 
         console.error(`Error in /api/trigger-curation-single: ${error.message}`);
         res.status(500).json({ error: error.message });
     }
+});
+
+app.post("/api/categorize-single", authenticateToken, async (req, res) => {
+  try {
+    const { row_number } = req.body;
+    if (!row_number || isNaN(parseInt(row_number, 10))) {
+      return res.status(400).json({ error: "Parâmetro 'row_number' é obrigatório e deve ser um número." });
+    }
+    const result = await executarCategorizacaoLinhaUnica(parseInt(row_number, 10));
+    res.json(result);
+  } catch (error) {
+    console.error(`Error in /api/categorize-single: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.get("/api/curation", authenticateToken, async (req, res) => {
