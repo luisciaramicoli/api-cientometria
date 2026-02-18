@@ -257,18 +257,6 @@ async function runExtractionAgent(query, documentText = null, file = null) {
     }
 }
 
-        if (Object.keys(combinedData).every(key => combinedData[key] === "")) {
-            return { error: "Não foi possível encontrar nenhum metadado para a consulta fornecida de nenhuma fonte." };
-        }
-
-        return combinedData;
-
-    } catch (e) {
-        console.error(`Erro na execução do agente: ${e.message}`);
-        throw new Error(`Ocorreu um erro durante a extração de metadados: ${e.message}`);
-    }
-}
-
 
 /**
  * Handler do Express para o endpoint de extração de metadados.
