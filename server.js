@@ -126,7 +126,7 @@ app.post("/api/register", authenticateToken, authorizeAdmin, async (req, res) =>
   }
 
   // Validação simples de role
-  const validRoles = ['admin', 'cientometria', 'curadoria_boaretto', 'curadoria_lucas'];
+  const validRoles = ['admin', 'cientometria', 'curadoria_boaretto', 'curadoria_bonetti'];
   if (!validRoles.includes(role)) {
     return res.status(400).json({ error: `Role inválida. Roles permitidas: ${validRoles.join(', ')}.` });
   }

@@ -31,7 +31,7 @@ const initDb = async () => {
                 username VARCHAR(50) NOT NULL UNIQUE,
                 email VARCHAR(255) NOT NULL UNIQUE,
                 password_hash VARCHAR(60) NOT NULL,
-                role ENUM('admin', 'cientometria', 'curadoria_boaretto', 'curadoria_lucas') NOT NULL DEFAULT 'cientometria',
+                role ENUM('admin', 'cientometria', 'curadoria_boaretto', 'curadoria_bonetti') NOT NULL DEFAULT 'cientometria',
                 is_active BOOLEAN DEFAULT TRUE,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP

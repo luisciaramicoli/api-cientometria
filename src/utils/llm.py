@@ -208,6 +208,11 @@ async def curar_documento(payload: PDFPayload):
     # Use os headers fornecidos no payload para o esqueleto JSON
     current_headers = list(payload.headers)
     
+    # Remove CATEGORIA para que não seja preenchida em curadoria
+    # A categoria será determinada somente no endpoint /categorize
+    if "CATEGORIA" in current_headers:
+        current_headers.remove("CATEGORIA")
+    
     # Garante que os cabeçalhos de curadoria estejam presentes, se ainda não estiverem.
     if "APROVAÇÃO CURADOR (marcar)" not in current_headers:
         current_headers.append("APROVAÇÃO CURADOR (marcar)")
@@ -225,12 +230,12 @@ Sua Tarefa Principal: Extrair todos os metadados solicitados do texto fornecido 
 
 **INSTRUÇÕES DE EXTRAÇÃO DE METADADOS (Siga para todos os campos):**
 - **Subtítulo:** Extraia o subtítulo do artigo, se houver.
-- **Caracteristicas do solo e região (escrever):** Descreva em um parágrafo as características do solo, clima e localização geográfica mencionadas no estudo.
-- **ferramentas e técnicas (seleção):** Liste as metodologias científicas, ferramentas de laboratório ou campo. Ex: "PCR, Sequenciamento, Microscopia, Ensaios em vasos".
-- **nutrientes (seleção):** Liste os MICRO-ORGANISMOS (Gênero/Espécie) ou AGENTES BIOLÓGICOS investigados. Ex: "Bradyrhizobium japonicum, Trichoderma harzianum, Bacillus subtilis".
-- **estratégias de fornecimento de nutrientes (seleção):** Liste o MODO DE APLICAÇÃO ou FORMULAÇÃO do bioinsumo. Ex: "Inoculação de sementes, Aplicação via sulco, Pulverização foliar, Grânulos".
-- **grupos de culturas (seleção):** Liste os grandes grupos de culturas agrícolas investigados.
-- **culturas presentes (seleção):** Liste os nomes específicos das culturas ou plantas estudadas.
+- **Caracteristicas do solo e região (escrever):** Descreva em um parágrafo as características do solo, clima e localização geográfica mencionadas no estudo. Se não mencionadas, deixe vazio.
+- **ferramentas e técnicas (seleção):** Liste as metodologias científicas, ferramentas de laboratório ou campo. Ex: "PCR, Sequenciamento, Microscopia, Ensaios em vasos". Sempre liste pelo menos uma se aplicável.
+- **nutrientes (seleção):** Liste os MICRO-ORGANISMOS (Gênero/Espécie) ou AGENTES BIOLÓGICOS investigados. Ex: "Bradyrhizobium japonicum, Trichoderma harzianum, Bacillus subtilis". Sempre liste pelo menos um se aplicável.
+- **estratégias de fornecimento de nutrientes (seleção):** Liste o MODO DE APLICAÇÃO ou FORMULAÇÃO do bioinsumo. Ex: "Inoculação de sementes, Aplicação via sulco, Pulverização foliar, Grânulos". Sempre liste pelo menos uma se aplicável.
+- **grupos de culturas (seleção):** Liste os grandes grupos de culturas agrícolas investigados. Sempre liste pelo menos um se aplicável.
+- **culturas presentes (seleção):** Liste os nomes específicos das culturas ou plantas estudadas. Sempre liste pelo menos uma se aplicável.
 
 **CONTEXTO DE CURADORIA (se aplicável):**
 Se os campos "APROVAÇÃO CURADOR (marcar)" e "FEEDBACK DO CURADOR (escrever)" estiverem presentes no esquema,
@@ -244,7 +249,7 @@ você TAMBÉM atuará como um Curador Científico especializado em BIOINSUMOS, s
 
 **REGRAS DE SAÍDA (Siga rigorosamente):**
 1.  Sua saída completa deve ser um único objeto JSON válido.
-2.  Preencha todos os campos de texto do esquema com base no conteúdo do documento. Se um campo não puder ser encontrado ou não for aplicável, preencha com "N/A".
+2.  Preencha todos os campos de texto do esquema com base no conteúdo do documento. Garanta que os campos específicos (Caracteristicas do solo e região, ferramentas e técnicas, nutrientes, estratégias de fornecimento de nutrientes, grupos de culturas, culturas presentes) sejam sempre respondidos com informações relevantes, inferindo do contexto se necessário. Se um campo não puder ser encontrado ou não for aplicável, deixe vazio.
 3.  Se os campos de curadoria estiverem presentes:
     -   Preencha o campo **'FEEDBACK DO CURADOR (escrever)'** com a razão explícita para sua decisão:
         -   Se aprovando: Comece com "Aprovado:" e declare a contribuição específica do bioinsumo (ex: "Aprovado: Avalia a eficácia de Bacillus no controle de fungos em soja.").
@@ -257,12 +262,12 @@ Sua Tarefa Principal: Extrair todos os metadados solicitados do texto fornecido 
 
 **INSTRUÇÕES DE EXTRAÇÃO DE METADADOS (Siga para todos os campos):**
 - **Subtítulo:** Extraia o subtítulo do artigo, se houver.
-- **Caracteristicas do solo e região (escrever):** Descreva em um parágrafo as características do solo, clima e localização geográfica mencionadas no estudo.
-- **ferramentas e técnicas (seleção):** Liste, em formato de string separada por vírgulas, as principais ferramentas, equipamentos e metodologias científicas utilizadas. Ex: "Cromatografia gasosa, Espectrometria de massa, Análise de variância (ANOVA)".
-- **nutrientes (seleção):** Liste, em formato de string separada por vírgulas, todos os nutrientes de plantas (macro e micro) que são foco do estudo. Ex: "Nitrogênio, Fósforo, Potássio, Boro".
-- **estratégias de fornecimento de nutrientes (seleção):** Liste, em formato de string separada por vírgulas, as estratégias de fertilização ou fornecimento de nutrientes. Ex: "Fertilização de cobertura, Adubação foliar, Fertirrigação".
-- **grupos de culturas (seleção):** Liste, em formato de string separada por vírgulas, os grandes grupos de culturas agrícolas investigados. Ex: "Cereais, Leguminosas, Hortaliças, Frutíferas".
-- **culturas presentes (seleção):** Liste, em formato de string separada por vírgulas, os nomes específicos das culturas ou plantas estudadas. Ex: "Milho (Zea mays), Soja (Glycine max), Tomate (Solanum lycopersicum)".
+- **Caracteristicas do solo e região (escrever):** Descreva em um parágrafo as características do solo, clima e localização geográfica mencionadas no estudo. Se não mencionadas, deixe vazio.
+- **ferramentas e técnicas (seleção):** Liste, em formato de string separada por vírgulas, as principais ferramentas, equipamentos e metodologias científicas utilizadas. Ex: "Cromatografia gasosa, Espectrometria de massa, Análise de variância (ANOVA)". Sempre liste pelo menos uma se aplicável.
+- **nutrientes (seleção):** Liste, em formato de string separada por vírgulas, todos os nutrientes de plantas (macro e micro) que são foco do estudo. Ex: "Nitrogênio, Fósforo, Potássio, Boro". Sempre liste pelo menos um se aplicável.
+- **estratégias de fornecimento de nutrientes (seleção):** Liste, em formato de string separada por vírgulas, as estratégias de fertilização ou fornecimento de nutrientes. Ex: "Fertilização de cobertura, Adubação foliar, Fertirrigação". Sempre liste pelo menos uma se aplicável.
+- **grupos de culturas (seleção):** Liste, em formato de string separada por vírgulas, os grandes grupos de culturas agrícolas investigados. Ex: "Cereais, Leguminosas, Hortaliças, Frutíferas". Sempre liste pelo menos um se aplicável.
+- **culturas presentes (seleção):** Liste, em formato de string separada por vírgulas, os nomes específicos das culturas ou plantas estudadas. Ex: "Milho (Zea mays), Soja (Glycine max), Tomate (Solanum lycopersicum)". Sempre liste pelo menos uma se aplicável.
 
 **CONTEXTO DE CURADORIA (se aplicável):**
 Se os campos "APROVAÇÃO CURADOR (marcar)" e "FEEDBACK DO CURADOR (escrever)" estiverem presentes no esquema,
@@ -278,7 +283,7 @@ você TAMBÉM atuará como um Curador Científico especializado em Agronomia, se
 
 **REGRAS DE SAÍDA (Siga rigorosamente):**
 1.  Sua saída completa deve ser um único objeto JSON válido.
-2.  Preencha todos os campos de texto do esquema com base no conteúdo do documento. Se um campo não puder ser encontrado ou não for aplicável, preencha com "N/A".
+2.  Preencha todos os campos de texto do esquema com base no conteúdo do documento. Garanta que os campos específicos (Caracteristicas do solo e região, ferramentas e técnicas, nutrientes, estratégias de fornecimento de nutrientes, grupos de culturas, culturas presentes) sejam sempre respondidos com informações relevantes, inferindo do contexto se necessário. Se um campo não puder ser encontrado ou não for aplicável, deixe vazio.
 3.  Se os campos de curadoria estiverem presentes:
     -   Preencha o campo **'FEEDBACK DO CURADOR (escrever)'** com a razão explícita para sua decisão:
         -   Se aprovando: Comece com "Aprovado:" e depois declare brevemente a contribuição agronômica específica (ex: "Aprovado: Detalha uma nova técnica de irrigação para milho.").
@@ -348,14 +353,14 @@ async def categorize_article(payload: PDFPayload):
 
     Categorias disponíveis:
     - BIOINSSUMOS
-    - MANEJO DE NUTRIENTES E AGUA
+    - MANEJO ECOFISIOLÓGICO E NUTRICIONAL DA CITRICULTURA DE ALTA PERFORMANCE
 
     Se o artigo abordar ambos os temas, escolha a categoria que for mais proeminente no texto.
-    Se o artigo não se encaixar claramente em nenhuma das categorias ou o conteúdo for irrelevante, retorne "N/A".
+    Sempre retorne uma das duas categorias, mesmo que o artigo não se encaixe perfeitamente.
     """
 
     user_prompt = f"""
-    Classifique o seguinte artigo:
+    Classifique o seguinte artigo em uma das categorias: BIOINSSUMOS ou MANEJO ECOFISIOLÓGICO E NUTRICIONAL DA CITRICULTURA DE ALTA PERFORMANCE.
 
     '''
     {document_text[:7000]}
@@ -378,8 +383,8 @@ async def categorize_article(payload: PDFPayload):
         category = completion.choices[0].message.content.strip()
         
         # Validate the category
-        if category not in ["BIOINSSUMOS", "MANEJO DE NUTRIENTES E AGUA", "N/A"]:
-            category = "N/A" # Default to N/A if LLM returns something unexpected
+        if category not in ["BIOINSSUMOS", "MANEJO ECOFISIOLÓGICO E NUTRICIONAL DA CITRICULTURA DE ALTA PERFORMANCE"]:
+            category = "BIOINSSUMOS" # Default to BIOINSSUMOS if unexpected
 
         return {"category": category}
 
