@@ -51,12 +51,32 @@ const authenticateToken = (req, res, next) => {
     return res.status(401).json({ error: "Token não fornecido." }); // Unauthorized
   }
 
-  jwt.verify(token, JWT_SECRET, (err, user) => {
+  jwt.verify(token, JWT_SECRET, async (err, decodedUser) => {
     if (err) {
       return res.status(403).json({ error: "Token inválido." }); // Forbidden
     }
-    req.user = user;
-    next();
+    
+    try {
+      // Buscar dados atualizados do usuário, incluindo permissões
+      const [rows] = await pool.execute("SELECT id, username, role, allowed_categories FROM users WHERE id = ?", [decodedUser.id]);
+      if (rows.length === 0) return res.status(404).json({ error: "Usuário não encontrado." });
+      
+      const user = rows[0];
+      // Tentar parsear allowed_categories se for uma string JSON
+      if (user.allowed_categories) {
+        try {
+          user.allowed_categories = JSON.parse(user.allowed_categories);
+        } catch (e) {
+          // Se não for JSON, tratar como string simples (ou array se já for)
+        }
+      }
+      
+      req.user = user;
+      next();
+    } catch (dbErr) {
+      console.error("Erro ao verificar usuário no middleware:", dbErr.message);
+      res.status(500).json({ error: "Erro interno do servidor." });
+    }
   });
 };
 
@@ -134,7 +154,7 @@ app.post("/api/register", authenticateToken, authorizeAdmin, async (req, res) =>
   try {
     const hash = await bcrypt.hash(password, saltRounds);
     const [result] = await pool.execute(
-      "INSERT INTO users (username, email, password_hash, role, is_active) VALUES (?, ?, ?, ?, TRUE)",
+      "INSERT INTO users (username, email, password_hash, role, is_active, allowed_categories) VALUES (?, ?, ?, ?, TRUE, NULL)",
       [username, email, hash, role]
     );
     res.status(201).json({ message: "Usuário registrado com sucesso!", userId: result.insertId });
@@ -144,6 +164,37 @@ app.post("/api/register", authenticateToken, authorizeAdmin, async (req, res) =>
       return res.status(409).json({ error: "Nome de usuário ou e-mail já existe." });
     }
     res.status(500).json({ error: "Erro interno do servidor ao registrar usuário." });
+  }
+});
+
+// --- Rota para Listar Usuários (Admin) ---
+app.get("/api/users", authenticateToken, authorizeAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.execute("SELECT id, username, email, role, is_active, allowed_categories FROM users");
+    res.json(rows);
+  } catch (err) {
+    console.error("Erro ao listar usuários:", err.message);
+    res.status(500).json({ error: "Erro interno do servidor." });
+  }
+});
+
+// --- Rota para Atualizar Permissões do Usuário (Admin) ---
+app.put("/api/users/:id/permissions", authenticateToken, authorizeAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { role, allowed_categories } = req.body;
+
+  try {
+    // allowed_categories deve ser um array ou string (vamos converter para string JSON se for array)
+    const categoriesStr = Array.isArray(allowed_categories) ? JSON.stringify(allowed_categories) : (allowed_categories || null);
+    
+    await pool.execute(
+      "UPDATE users SET role = ?, allowed_categories = ? WHERE id = ?",
+      [role, categoriesStr, id]
+    );
+    res.json({ message: "Permissões atualizadas com sucesso!" });
+  } catch (err) {
+    console.error("Erro ao atualizar permissões:", err.message);
+    res.status(500).json({ error: "Erro interno do servidor." });
   }
 });
 
@@ -192,7 +243,23 @@ app.post("/api/categorize-single", authenticateToken, async (req, res) => {
 
 app.get("/api/curation", authenticateToken, async (req, res) => {
   try {
-    const articles = await getCuratedArticles();
+    let articles = await getCuratedArticles();
+    
+    // Filtrar por categoria se o usuário tiver permissões restritas (e não for admin)
+    if (req.user.role !== 'admin' && req.user.allowed_categories) {
+      const allowed = Array.isArray(req.user.allowed_categories) 
+        ? req.user.allowed_categories 
+        : [req.user.allowed_categories];
+      
+      console.log(`Filtrando artigos para o usuário ${req.user.username}. Categorias permitidas: ${allowed}`);
+      
+      articles = articles.filter(article => {
+        // Assume-se que a coluna na planilha é "CATEGORIA"
+        const category = article["CATEGORIA"] || article["categoria"];
+        return allowed.includes(category);
+      });
+    }
+    
     res.json(articles);
   } catch (error) {
     console.error(`Error in /api/curation: ${error.message}`);
