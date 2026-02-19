@@ -137,7 +137,8 @@ app.post("/api/login", async (req, res) => {
     }
 
     // Gerar o Token JWT
-    const userPayload = { username: user.username, id: user.id, role: user.role };
+    // Convertendo user.id para String para evitar perda de precisão
+    const userPayload = { username: user.username, id: String(user.id), role: user.role };
     const accessToken = jwt.sign(userPayload, JWT_SECRET, {
       expiresIn: "1h",
     }); // Token expira em 1 hora
