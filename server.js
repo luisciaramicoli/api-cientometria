@@ -164,11 +164,19 @@ app.post("/api/register", authenticateToken, authorizeAdmin, async (req, res) =>
     return res.status(400).json({ error: `Role inválida. Roles permitidas: ${validRoles.join(', ')}.` });
   }
 
+  // Atribuição automática de categorias baseada no Role
+  let allowedCategories = null;
+  if (role === 'curadoria_boaretto') {
+    allowedCategories = JSON.stringify(["MANEJO ECOFISIOLÓGICO E NUTRICIONAL DA CITRICULTURA DE ALTA PERFORMANCE"]);
+  } else if (role === 'curadoria_bonetti') {
+    allowedCategories = JSON.stringify(["BIOINSUMOS"]);
+  }
+
   try {
     const hash = await bcrypt.hash(password, saltRounds);
     const [result] = await pool.execute(
-      "INSERT INTO users (username, email, password_hash, role, is_active, allowed_categories) VALUES (?, ?, ?, ?, TRUE, NULL)",
-      [username, email, hash, role]
+      "INSERT INTO users (username, email, password_hash, role, is_active, allowed_categories) VALUES (?, ?, ?, ?, TRUE, ?)",
+      [username, email, hash, role, allowedCategories]
     );
     res.status(201).json({ message: "Usuário registrado com sucesso!", userId: result.insertId });
   } catch (err) {
@@ -187,6 +195,18 @@ app.get("/api/users", authenticateToken, authorizeAdmin, async (req, res) => {
     res.json(rows);
   } catch (err) {
     console.error("Erro ao listar usuários:", err.message);
+    res.status(500).json({ error: "Erro interno do servidor." });
+  }
+});
+
+// --- Rota para Excluir Usuário (Admin) ---
+app.delete("/api/users/:id", authenticateToken, authorizeAdmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.execute("DELETE FROM users WHERE id = ?", [id]);
+    res.json({ message: "Usuário excluído com sucesso!" });
+  } catch (err) {
+    console.error("Erro ao excluir usuário:", err.message);
     res.status(500).json({ error: "Erro interno do servidor." });
   }
 });
