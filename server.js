@@ -41,6 +41,12 @@ initDb();
 app.use(bodyParser.json());
 app.use(cors());
 
+// Middleware para Log de todas as requisições (ajuda no debug do Vercel)
+app.use((req, res, next) => {
+  console.log(`[API CALL] ${req.method} ${req.url}`);
+  next();
+});
+
 // --- AUTH MIDDLEWARE ---
 
 const authenticateToken = (req, res, next) => {
@@ -53,13 +59,19 @@ const authenticateToken = (req, res, next) => {
 
   jwt.verify(token, JWT_SECRET, async (err, decodedUser) => {
     if (err) {
+      console.error("JWT Verify Error:", err.message);
       return res.status(403).json({ error: "Token inválido." }); // Forbidden
     }
     
     try {
+      console.log(`Autenticando usuário ID: ${decodedUser.id}`);
       // Buscar dados atualizados do usuário, incluindo permissões
       const [rows] = await pool.execute("SELECT id, username, role, allowed_categories FROM users WHERE id = ?", [decodedUser.id]);
-      if (rows.length === 0) return res.status(404).json({ error: "Usuário não encontrado." });
+      
+      if (rows.length === 0) {
+        console.warn(`Usuário ID ${decodedUser.id} não encontrado no banco.`);
+        return res.status(401).json({ error: "Usuário não encontrado ou inativo." });
+      }
       
       const user = rows[0];
       // Tentar parsear allowed_categories se for uma string JSON
@@ -471,3 +483,6 @@ app.listen(port, () => {
     "Servidor pronto. Usando banco de dados TiDB para autenticação.",
   );
 });
+
+// Exportar o app para compatibilidade correta com Vercel
+module.exports = app;
