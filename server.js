@@ -121,7 +121,7 @@ app.post("/api/login", async (req, res) => {
   }
 
   try {
-    const sql = `SELECT * FROM users WHERE username = ?`;
+    const sql = `SELECT *, CAST(id AS CHAR) as id_str FROM users WHERE username = ?`;
     const [rows] = await pool.execute(sql, [username]);
 
     const user = rows[0];
@@ -137,8 +137,8 @@ app.post("/api/login", async (req, res) => {
     }
 
     // Gerar o Token JWT
-    // Convertendo user.id para String para evitar perda de precisão
-    const userPayload = { username: user.username, id: String(user.id), role: user.role };
+    // Usamos id_str que veio do CAST no SQL
+    const userPayload = { username: user.username, id: user.id_str, role: user.role };
     const accessToken = jwt.sign(userPayload, JWT_SECRET, {
       expiresIn: "1h",
     }); // Token expira em 1 hora
