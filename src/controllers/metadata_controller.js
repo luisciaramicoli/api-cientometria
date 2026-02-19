@@ -1,7 +1,6 @@
 const axios = require('axios');
 const pdf = require('pdf-parse');
 const Tesseract = require('tesseract.js');
-const { pdfToImg } = require('pdf-to-img');
 
 const ALL_METADATA_FIELDS = [
     "Autor(es)",
@@ -44,6 +43,8 @@ async function performOCR(pdfBuffer, maxPages = 3) {
     console.log(`Iniciando OCR para as primeiras ${maxPages} páginas...`);
     let fullText = "";
     try {
+        // Carrega o módulo ESM dinamicamente para evitar erro no CommonJS
+        const { pdfToImg } = await import('pdf-to-img');
         const images = await pdfToImg(pdfBuffer);
         let pageCount = 0;
         
