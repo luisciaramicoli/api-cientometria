@@ -280,16 +280,17 @@ app.get("/api/curation", authenticateToken, async (req, res) => {
     
     // Filtrar por categoria se o usuário tiver permissões restritas (e não for admin)
     if (req.user.role !== 'admin' && req.user.allowed_categories) {
-      const allowed = Array.isArray(req.user.allowed_categories) 
+      const allowed = (Array.isArray(req.user.allowed_categories) 
         ? req.user.allowed_categories 
-        : [req.user.allowed_categories];
+        : [req.user.allowed_categories]
+      ).map(c => String(c).trim().toLowerCase());
       
-      console.log(`Filtrando artigos para o usuário ${req.user.username}. Categorias permitidas: ${allowed}`);
+      console.log(`Filtrando artigos para o usuário ${req.user.username}. Categorias permitidas (normalizadas): ${allowed}`);
       
       articles = articles.filter(article => {
-        // Assume-se que a coluna na planilha é "CATEGORIA"
-        const category = article["CATEGORIA"] || article["categoria"];
-        return allowed.includes(category);
+        const category = String(article["CATEGORIA"] || article["categoria"] || "").trim().toLowerCase();
+        // Verifica se a categoria do artigo está entre as permitidas
+        return allowed.some(a => a === category);
       });
     }
     
