@@ -653,14 +653,32 @@ async function processDriveFolderForBatchInsert(folderId) {
   const articlesToUpload = [];
   let processedCount = 0;
   let errorCount = 0;
+  let skippedCount = 0;
 
   for (const file of pdfFiles) {
     try {
+      // Preliminary check by filename as a title proxy before full processing if possible
+      const fileNameTitle = file.name.replace(/\.pdf$/i, "");
+      const duplicate = await isDuplicate(sheets, null, fileNameTitle);
+      if (duplicate) {
+        console.log(`Skipping duplicate file: ${file.name}`);
+        skippedCount++;
+        continue;
+      }
+
       const pdfBuffer = await downloadDrivePdfContent(drive, file.id);
       
       const category = await callCategorizationApi(pdfBuffer);
       
       const extractedMetadata = await callCustomCuradorApi(pdfBuffer, ALL_METADATA_FIELDS);
+
+      // Check duplicate again with full extracted title/DOI
+      const fullDuplicate = await isDuplicate(sheets, extractedMetadata["DOI"], extractedMetadata["Titulo"] || extractedMetadata["Título"]);
+      if (fullDuplicate) {
+        console.log(`Skipping duplicate after metadata extraction: ${extractedMetadata["Titulo"]}`);
+        skippedCount++;
+        continue;
+      }
 
       const rowData = {};
       ALL_METADATA_FIELDS.forEach(field => {
@@ -683,18 +701,20 @@ async function processDriveFolderForBatchInsert(folderId) {
     const success = await uploadToGsheets(sheets, articlesToUpload);
     if (success) {
       return {
-        message: `Processamento em lote concluído. Total: ${pdfFiles.length}, Processados com sucesso: ${processedCount}, Com erros: ${errorCount}. Dados inseridos na planilha.`,
+        message: `Processamento em lote concluído. Total: ${pdfFiles.length}, Processados com sucesso: ${processedCount}, Com erros: ${errorCount}, Duplicados: ${skippedCount}. Dados inseridos na planilha.`,
         processedCount,
         errorCount,
+        skippedCount,
       };
     } else {
       throw new Error("Falha ao inserir os dados na planilha.");
     }
   } else {
     return {
-      message: `Processamento em lote concluído. Total: ${pdfFiles.length}, Nenhum artigo elegível para upload.`,
+      message: `Processamento em lote concluído. Total: ${pdfFiles.length}, Nenhum artigo novo inserido (Poderiam ser duplicatas: ${skippedCount}).`,
       processedCount,
       errorCount,
+      skippedCount,
     };
   }
 }
@@ -781,6 +801,44 @@ async function searchOpenAlex(
   }));
 }
 
+async function isDuplicate(sheets, doi, title) {
+  try {
+    const { data } = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `'${SHEET_NAME}'!A:ZZ`,
+    });
+
+    if (!data.values || data.values.length < 2) return false;
+
+    const [headers, ...rows] = data.values;
+    const doiIndex = headers.indexOf("DOI");
+    const titleIndex = headers.indexOf("Título");
+    const titleIndexAlt = headers.indexOf("Titulo");
+
+    const searchDoi = doi ? String(doi).trim().toLowerCase() : null;
+    const searchTitle = title ? String(title).trim().toLowerCase() : null;
+
+    for (const row of rows) {
+      if (searchDoi && doiIndex !== -1) {
+        const rowDoi = String(row[doiIndex] || "").trim().toLowerCase();
+        if (rowDoi === searchDoi && rowDoi !== "") return true;
+      }
+
+      if (searchTitle) {
+        const idx = titleIndex !== -1 ? titleIndex : titleIndexAlt;
+        if (idx !== -1) {
+          const rowTitle = String(row[idx] || "").trim().toLowerCase();
+          if (rowTitle === searchTitle && rowTitle !== "") return true;
+        }
+      }
+    }
+    return false;
+  } catch (error) {
+    console.error("Error checking for duplicates:", error.message);
+    return false; // In case of error, assume not duplicate to avoid blocking
+  }
+}
+
 async function saveData(selectedRows) {
   const { drive, sheets } = await getAuthenticatedServices();
   const tempDir = path.join(__dirname, "temp_downloads_web");
@@ -788,6 +846,13 @@ async function saveData(selectedRows) {
   const finalDataToUpload = [];
 
   for (const [i, rowData] of selectedRows.entries()) {
+    // Check for duplicates before processing
+    const duplicate = await isDuplicate(sheets, rowData.doi, rowData.title);
+    if (duplicate) {
+      console.log(`Skipping duplicate: ${rowData.title} (DOI: ${rowData.doi})`);
+      continue;
+    }
+
     let finalDriveUrl = rowData["URL Original"] || rowData.doi;
     if (rowData.pdf_url) {
       const docId = (rowData.work_id || `unknown-${i}`).split("/").pop();
@@ -875,6 +940,14 @@ async function uploadToGsheets(sheets, data) {
  */
 async function manualInsert(data) {
   const { sheets } = await getAuthenticatedServices();
+
+  const isAlreadyPresent = await isDuplicate(sheets, data.DOI, data.Titulo);
+  if (isAlreadyPresent) {
+    return {
+      status: "error",
+      message: `Erro: O documento '${data.Titulo}' já está cadastrado na planilha e não pode ser inserido novamente.`,
+    };
+  }
 
   const rowToUpload = {
     "Autor(es)": data["Autor(es)"],

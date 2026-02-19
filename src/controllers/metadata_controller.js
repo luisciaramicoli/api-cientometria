@@ -1,5 +1,7 @@
 const axios = require('axios');
 const pdf = require('pdf-parse');
+const Tesseract = require('tesseract.js');
+const { pdfToImg } = require('pdf-to-img');
 
 const ALL_METADATA_FIELDS = [
     "Autor(es)",
@@ -31,6 +33,41 @@ const ALL_METADATA_FIELDS = [
     "culturas presentes (seleção)",
     "FEEDBACK DO CURADOR (escrever)",
 ];
+
+/**
+ * Realiza OCR nas primeiras páginas de um PDF.
+ * @param {Buffer} pdfBuffer - O buffer do arquivo PDF.
+ * @param {number} maxPages - O número máximo de páginas para processar (padrão: 3).
+ * @returns {Promise<string>} - O texto extraído via OCR.
+ */
+async function performOCR(pdfBuffer, maxPages = 3) {
+    console.log(`Iniciando OCR para as primeiras ${maxPages} páginas...`);
+    let fullText = "";
+    try {
+        const images = await pdfToImg(pdfBuffer);
+        let pageCount = 0;
+        
+        for await (const image of images) {
+            if (pageCount >= maxPages) break;
+            console.log(`Processando página ${pageCount + 1} com OCR...`);
+            
+            // O tesseract.js pode receber o buffer da imagem diretamente
+            const { data: { text } } = await Tesseract.recognize(image, 'por+eng', {
+                logger: m => console.log(`OCR Progress (página ${pageCount + 1}):`, m.status, (m.progress * 100).toFixed(2) + "%")
+            });
+            
+            fullText += text + "\n";
+            pageCount++;
+        }
+        
+        console.log("OCR concluído com sucesso.");
+        return fullText;
+    } catch (error) {
+        console.error("Erro durante o OCR:", error.message);
+        return "";
+    }
+}
+
 
 /**
  * Busca metadados no Crossref.
@@ -281,6 +318,20 @@ async function extractMetadata(req, res) {
         try {
             const data = await pdf(file.buffer);
             documentFullText = data.text; // Store the full text
+            
+            // Lógica de fallback para OCR:
+            // Se o texto extraído for muito curto (ex: < 500 caracteres), pode ser imagem.
+            if (!documentFullText || documentFullText.trim().length < 500) {
+                console.warn("Texto extraído via pdf-parse é insuficiente (< 500 chars). Tentando OCR...");
+                const ocrText = await performOCR(file.buffer);
+                if (ocrText && ocrText.trim().length > 0) {
+                   documentFullText = (documentFullText || "") + "\n\n--- OCR Extraído ---\n" + ocrText;
+                   console.log("OCR adicionado ao texto do documento.");
+                } else {
+                   console.warn("OCR não retornou texto adicional significativo.");
+                }
+            }
+
             // Tenta extrair o título dos metadados do PDF, senão usa a primeira linha
             queryTitle = data.info.Title || (documentFullText || '').split('\n')[0].trim();
 

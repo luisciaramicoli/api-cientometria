@@ -1,47 +1,3 @@
-Hugging Face's logo
-Hugging Face
-Models
-Datasets
-Spaces
-Community
-Docs
-Enterprise
-Pricing
-
-
-Spaces:
-Curadoria
-/
-LLM_curadoria
-
-
-like
-0
-
-Logs
-App
-Files
-Community
-Settings
-LLM_curadoria
-/
-main.py
-
-Curadoria's picture
-Curadoria
-Tradução das respostas para portugues para que não haja inconsistencias nas respostas
-9688255
-verified
-26 days ago
-raw
-
-Copy download link
-history
-blame
-edit
-delete
-
-8.13 kB
 import os
 import json
 import base64
@@ -207,12 +163,12 @@ async def curar_documento(payload: PDFPayload):
     # 5. Gerenciamento de Colunas e Schema
     # Use os headers fornecidos no payload para o esqueleto JSON
     current_headers = list(payload.headers)
-    
+
     # Remove CATEGORIA para que não seja preenchida em curadoria
     # A categoria será determinada somente no endpoint /categorize
     if "CATEGORIA" in current_headers:
         current_headers.remove("CATEGORIA")
-    
+
     # Garante que os cabeçalhos de curadoria estejam presentes, se ainda não estiverem.
     if "APROVAÇÃO CURADOR (marcar)" not in current_headers:
         current_headers.append("APROVAÇÃO CURADOR (marcar)")
@@ -381,7 +337,7 @@ async def categorize_article(payload: PDFPayload):
         )
 
         category = completion.choices[0].message.content.strip()
-        
+
         # Validate the category
         if category not in ["BIOINSSUMOS", "MANEJO ECOFISIOLÓGICO E NUTRICIONAL DA CITRICULTURA DE ALTA PERFORMANCE"]:
             category = "BIOINSSUMOS" # Default to BIOINSSUMOS if unexpected
