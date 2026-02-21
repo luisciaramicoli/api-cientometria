@@ -15,9 +15,10 @@ const {
   manualInsert,
   aprovarManualmente,
   processDriveFolderForBatchInsert,
+  uploadFileToDrive,
 } = require("./src/services/api_logic.js");
-const { getAuthenticatedServices, uploadFileToDrive } = require("./src/services/api_logic.js");
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const path = require('path');
 const { pool, initDb, saltRounds } = require("./src/services/database.js"); // Import saltRounds
 const { extractMetadata } = require("./src/controllers/metadata_controller.js"); // Importar o novo controller
@@ -66,7 +67,7 @@ const authenticateToken = (req, res, next) => {
     try {
       console.log(`Autenticando usuário ID: ${decodedUser.id}`);
       // Buscar dados atualizados do usuário, incluindo permissões
-      const [rows] = await pool.execute("SELECT id, username, role, allowed_categories FROM users WHERE id = ?", [decodedUser.id]);
+      const [rows] = await pool.execute("SELECT id, username, role, allowed_categories FROM users WHERE id = ?", [parseInt(decodedUser.id, 10)]);
       
       if (rows.length === 0) {
         console.warn(`Usuário ID ${decodedUser.id} não encontrado no banco.`);
@@ -103,6 +104,9 @@ const authorizeAdmin = (req, res, next) => {
 
 // --- API ROUTES ---
 
+// Servir arquivos estáticos da pasta de documentos
+app.use("/documents", express.static(path.join(__dirname, "documents")));
+
 app.get("/", (req, res) => {
   res.send("Node.js API server is running. Use /api/login para autenticar.");
 });
@@ -121,7 +125,7 @@ app.post("/api/login", async (req, res) => {
   }
 
   try {
-    const sql = `SELECT *, CAST(id AS CHAR) as id_str FROM users WHERE username = ?`;
+    const sql = `SELECT *, CAST(id AS TEXT) as id_str FROM users WHERE username = ?`;
     const [rows] = await pool.execute(sql, [username]);
 
     const user = rows[0];
@@ -137,7 +141,6 @@ app.post("/api/login", async (req, res) => {
     }
 
     // Gerar o Token JWT
-    // Usamos id_str que veio do CAST no SQL
     const userPayload = { username: user.username, id: user.id_str, role: user.role };
     const accessToken = jwt.sign(userPayload, JWT_SECRET, {
       expiresIn: "1h",
@@ -175,13 +178,13 @@ app.post("/api/register", authenticateToken, authorizeAdmin, async (req, res) =>
   try {
     const hash = await bcrypt.hash(password, saltRounds);
     const [result] = await pool.execute(
-      "INSERT INTO users (username, email, password_hash, role, is_active, allowed_categories) VALUES (?, ?, ?, ?, TRUE, ?)",
+      "INSERT INTO users (username, email, password_hash, role, is_active, allowed_categories) VALUES (?, ?, ?, ?, 1, ?)",
       [username, email, hash, role, allowedCategories]
     );
     res.status(201).json({ message: "Usuário registrado com sucesso!", userId: result.insertId });
   } catch (err) {
     console.error("Erro ao registrar usuário:", err.message);
-    if (err.code === 'ER_DUP_ENTRY') { // MySQL/TiDB specific error for duplicate entry
+    if (err.code === 'ER_DUP_ENTRY' || err.code === 'SQLITE_CONSTRAINT') {
       return res.status(409).json({ error: "Nome de usuário ou e-mail já existe." });
     }
     res.status(500).json({ error: "Erro interno do servidor ao registrar usuário." });
@@ -275,30 +278,54 @@ app.post("/api/categorize-single", authenticateToken, async (req, res) => {
 });
 
 app.get("/api/curation", authenticateToken, async (req, res) => {
+  console.log(`[/api/curation] Request received from user: ${req.user ? req.user.username : 'unknown'}`);
   try {
+    console.log("Fetching curated articles...");
     let articles = await getCuratedArticles();
+    console.log(`Fetched ${articles.length} articles.`);
     
     // Filtrar por categoria se o usuário tiver permissões restritas (e não for admin)
-    if (req.user.role !== 'admin' && req.user.allowed_categories) {
-      const allowed = (Array.isArray(req.user.allowed_categories) 
-        ? req.user.allowed_categories 
-        : [req.user.allowed_categories]
-      ).map(c => String(c).trim().toLowerCase());
-      
-      console.log(`Filtrando artigos para o usuário ${req.user.username}. Categorias permitidas (normalizadas): ${allowed}`);
-      
-      articles = articles.filter(article => {
-        const category = String(article["CATEGORIA"] || article["categoria"] || "").trim().toLowerCase();
-        // Verifica se a categoria do artigo está entre as permitidas
-        return allowed.some(a => a === category);
-      });
+    if (req.user && req.user.role !== 'admin' && req.user.allowed_categories) {
+      console.log("Filtering articles by category...");
+      try {
+        const allowedCategories = req.user.allowed_categories;
+        const allowed = (Array.isArray(allowedCategories) 
+          ? allowedCategories 
+          : [allowedCategories]
+        )
+        .filter(c => c !== null && c !== undefined)
+        .map(c => String(c).trim().toLowerCase());
+        
+        console.log(`Filtrando artigos para o usuário ${req.user.username}. Categorias permitidas: ${allowed}`);
+        
+        if (allowed.length > 0) {
+          articles = articles.filter(article => {
+            if (!article) return false;
+            const category = String(article["CATEGORIA"] || article["categoria"] || "").trim().toLowerCase();
+            return allowed.some(a => a === category);
+          });
+        }
+        console.log(`Filtered to ${articles.length} articles.`);
+      } catch (filterErr) {
+        console.error("Error during category filtering:", filterErr.message);
+        // Continue with unfiltered articles if filter fails, or throw?
+        // Better to throw to be safe
+        throw filterErr;
+      }
     }
     
     res.json(articles);
   } catch (error) {
     console.error(`Error in /api/curation: ${error.message}`);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: "Erro ao carregar artigos da curadoria: " + error.message });
   }
+});
+
+// --- GLOBAL ERROR HANDLER ---
+app.use((err, req, res, next) => {
+  console.error("Unhandled Error:", err.message);
+  console.error(err.stack);
+  res.status(500).json({ error: "Ocorreu um erro interno no servidor." });
 });
 
 app.post("/api/search", authenticateToken, async (req, res) => {
@@ -387,22 +414,24 @@ app.post("/api/manual-insert", authenticateToken, upload.single('file'), async (
     console.log('[/api/manual-insert] Received body keys:', Object.keys(req.body || {}));
     console.log('[/api/manual-insert] Received file?:', !!req.file, req.file ? req.file.originalname : null);
 
-    // If a file was uploaded, save to Drive and set pub_url
+    // If a file was uploaded, save locally and set pub_url
     if (req.file) {
-      const tmpDir = path.join('/tmp', 'temp_uploads');
-      await fs.mkdir(tmpDir, { recursive: true });
       const originalName = req.file.originalname || `upload-${Date.now()}.pdf`;
-      const tmpPath = path.join(tmpDir, `${Date.now()}-${originalName}`);
+      const tmpPath = path.join(__dirname, "temp_uploads", `${Date.now()}-${originalName}`);
+      
+      // Ensure temp_uploads exists
+      if (!fsSync.existsSync(path.join(__dirname, "temp_uploads"))) {
+        fsSync.mkdirSync(path.join(__dirname, "temp_uploads"), { recursive: true });
+      }
+
       await fs.writeFile(tmpPath, req.file.buffer);
 
       try {
-        const { drive } = await getAuthenticatedServices();
-        const webViewLink = await uploadFileToDrive(drive, tmpPath, originalName);
-        if (webViewLink) data.pub_url = webViewLink;
+        const localFileName = await uploadFileToDrive(null, tmpPath, originalName);
+        if (localFileName) data.pub_url = localFileName;
       } catch (e) {
-        console.error('Error uploading file to Drive:', e.message);
+        console.error('Error saving file locally:', e.message);
       } finally {
-        // attempt to remove temp file
         try { await fs.unlink(tmpPath); } catch (e) { /* ignore */ }
       }
     }
@@ -462,13 +491,13 @@ app.post("/api/manual-insert", authenticateToken, upload.single('file'), async (
 
 app.post("/api/manual-approval", authenticateToken, async (req, res) => {
     try {
-        const { row_number, fileId } = req.body;
+        const { row_number, fileName } = req.body; // Use fileName for local
 
-        if (!row_number || !fileId) {
-            return res.status(400).json({ error: "Parâmetros 'row_number' e 'fileId' são obrigatórios." });
+        if (!row_number || !fileName) {
+            return res.status(400).json({ error: "Parâmetros 'row_number' e 'fileName' são obrigatórios." });
         }
 
-        const result = await aprovarManualmente(parseInt(row_number, 10), fileId);
+        const result = await aprovarManualmente(parseInt(row_number, 10), fileName);
         res.json(result);
     } catch (error) {
         console.error(`Error in /api/manual-approval: ${error.message}`);
@@ -476,17 +505,17 @@ app.post("/api/manual-approval", authenticateToken, async (req, res) => {
     }
 });
 
-app.post("/api/batch-process-drive-folder", authenticateToken, async (req, res) => {
+app.post("/api/batch-process-local-folder", authenticateToken, async (req, res) => {
   try {
-    const { folder_id } = req.body;
-    if (!folder_id) {
-      return res.status(400).json({ error: "O 'folder_id' é obrigatório." });
+    const { folder_path } = req.body;
+    if (!folder_path) {
+      return res.status(400).json({ error: "O 'folder_path' é obrigatório." });
     }
 
-    const result = await processDriveFolderForBatchInsert(folder_id);
+    const result = await processDriveFolderForBatchInsert(folder_path);
     res.json(result);
   } catch (error) {
-    console.error(`Error in /api/batch-process-drive-folder: ${error.message}`);
+    console.error(`Error in /api/batch-process-local-folder: ${error.message}`);
     res.status(500).json({ error: "Falha interna ao iniciar o processamento em lote." });
   }
 });
@@ -495,6 +524,16 @@ app.post("/api/batch-process-drive-folder", authenticateToken, async (req, res) 
 app.post("/api/extract-metadata", authenticateToken, upload.single('file'), extractMetadata);
 
 
+
+// --- DEBUG ROUTE ---
+app.get("/api/test-no-auth", async (req, res) => {
+  try {
+    const articles = await getCuratedArticles();
+    res.json(articles);
+  } catch (error) {
+    res.status(500).json({ error: error.message, stack: error.stack });
+  }
+});
 
 // --- SERVER START ---
 
