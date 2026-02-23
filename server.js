@@ -546,17 +546,19 @@ app.get("/api/test-no-auth", async (req, res) => {
 
 app.listen(port, "0.0.0.0", () => {
   const networkInterfaces = os.networkInterfaces();
-  let networkUrl = "";
+  let networkUrl = process.env.NETWORK_IP ? `http://${process.env.NETWORK_IP}:${port}` : "";
 
-  for (const interfaceName in networkInterfaces) {
-    for (const iface of networkInterfaces[interfaceName]) {
-      // No Node.js 18+, 'family' pode ser 'IPv4' ou 4.
-      if ((iface.family === "IPv4" || iface.family === 4) && !iface.internal) {
-        networkUrl = `http://${iface.address}:${port}`;
-        break;
+  if (!networkUrl) {
+    for (const interfaceName in networkInterfaces) {
+      for (const iface of networkInterfaces[interfaceName]) {
+        // No Node.js 18+, 'family' pode ser 'IPv4' ou 4.
+        if ((iface.family === "IPv4" || iface.family === 4) && !iface.internal) {
+          networkUrl = `http://${iface.address}:${port}`;
+          break;
+        }
       }
+      if (networkUrl) break;
     }
-    if (networkUrl) break;
   }
 
   console.log("\n  API SERVER READY");
