@@ -1,4 +1,5 @@
 const express = require("express");
+require('dotenv').config();
 const bodyParser = require("body-parser");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
@@ -21,6 +22,7 @@ const fs = require('fs').promises;
 const fsSync = require('fs');
 const path = require('path');
 const os = require('os');
+const { spawn } = require('child_process');
 const { pool, initDb, saltRounds } = require("./src/services/database.js"); // Import saltRounds
 const { extractMetadata } = require("./src/controllers/metadata_controller.js"); // Importar o novo controller
 const multer = require("multer"); // Importar multer
@@ -545,6 +547,18 @@ app.get("/api/test-no-auth", async (req, res) => {
 // --- SERVER START ---
 
 app.listen(port, "0.0.0.0", () => {
+  // Start the local LLM server (FastAPI) in background
+  console.log("Iniciando servidor LLM local (FastAPI)...");
+  const llmServer = spawn('uvicorn', ['src.utils.llm:app', '--host', '0.0.0.0', '--port', '8000'], {
+    stdio: 'inherit',
+    env: process.env,
+    shell: true
+  });
+
+  llmServer.on('error', (err) => {
+    console.error('Falha ao iniciar servidor LLM:', err.message);
+  });
+
   const networkInterfaces = os.networkInterfaces();
   let networkUrl = process.env.NETWORK_IP ? `http://${process.env.NETWORK_IP}:${port}` : "";
 

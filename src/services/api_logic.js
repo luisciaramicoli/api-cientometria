@@ -11,13 +11,17 @@ const xlsx = require("xlsx");
 const SHEET_NAME = "Tabela completa";
 const CONSOLIDADO_PATH = path.join(__dirname, "../../Consolidado - Respostas Gerais.xlsx");
 const DOCUMENTS_DIR = path.join(__dirname, "../../documents");
+const APROVADOS_DIR = path.join(DOCUMENTS_DIR, "aprovados");
+const REPROVADOS_DIR = path.join(DOCUMENTS_DIR, "reprovados");
 const EMAIL_CONTATO = process.env.EMAIL_CONTATO || "luisgustavobonfim996@gmail.com";
-const API_BASE_URL = process.env.API_BASE_URL || "https://curadoria-llm-curadoria.hf.space";
+const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:8000";
 
-// Ensure documents directory exists
-if (!fsSync.existsSync(DOCUMENTS_DIR)) {
-  fsSync.mkdirSync(DOCUMENTS_DIR, { recursive: true });
-}
+// Ensure directories exist
+[DOCUMENTS_DIR, APROVADOS_DIR, REPROVADOS_DIR].forEach(dir => {
+  if (!fsSync.existsSync(dir)) {
+    fsSync.mkdirSync(dir, { recursive: true });
+  }
+});
 
 // --- LOCAL DATA HELPERS ---
 function readWorkbook() {
@@ -811,11 +815,31 @@ async function deleteRow(rowNumber) {
     throw new Error(`Linha ${rowNumber} não existe.`);
   }
 
+  const headers = allData[0];
+  const urlIndex = headers.indexOf("URL DO DOCUMENTO");
+  const row = allData[rowNumber - 1];
+
+  // Move file to reprovados if it exists
+  if (urlIndex !== -1 && row[urlIndex]) {
+    const fileName = row[urlIndex];
+    const sourcePath = path.join(DOCUMENTS_DIR, fileName);
+    const targetPath = path.join(REPROVADOS_DIR, fileName);
+    
+    if (fsSync.existsSync(sourcePath)) {
+      try {
+        await fs.rename(sourcePath, targetPath);
+        console.log(`Arquivo ${fileName} movido para reprovados.`);
+      } catch (err) {
+        console.error(`Erro ao mover arquivo para reprovados: ${err.message}`);
+      }
+    }
+  }
+
   allData.splice(rowNumber - 1, 1);
   const newWs = xlsx.utils.aoa_to_sheet(allData);
   wb.Sheets[SHEET_NAME] = newWs;
   writeWorkbook(wb);
-  return { success: true, message: `Row ${rowNumber} deleted successfully from local sheet.` };
+  return { success: true, message: `Row ${rowNumber} deleted successfully and file moved to reprovados.` };
 }
 
 async function deleteUnavailableRows() {
@@ -863,24 +887,35 @@ async function aprovarManualmenteLocal(rowNumber, fileName) {
   }
 
   try {
-    const subDir = "aprovados";
-    const targetDir = path.join(DOCUMENTS_DIR, subDir);
-    if (!fsSync.existsSync(targetDir)) {
-      fsSync.mkdirSync(targetDir, { recursive: true });
-    }
-
-    const sourcePath = path.join(DOCUMENTS_DIR, fileName);
-    const targetPath = path.join(targetDir, fileName);
-
-    if (fsSync.existsSync(sourcePath)) {
-      await fs.copyFile(sourcePath, targetPath);
-    }
-
     const wb = readWorkbook();
     const ws = wb.Sheets[SHEET_NAME];
     const allData = xlsx.utils.sheet_to_json(ws, { header: 1 });
     const headers = allData[0];
+    const row = allData[rowNumber - 1];
+
+    if (!row) throw new Error(`Linha ${rowNumber} não encontrada.`);
+
+    // 1. Move PDF to aprovados
+    const sourcePath = path.join(DOCUMENTS_DIR, fileName);
+    const targetPath = path.join(APROVADOS_DIR, fileName);
+
+    if (fsSync.existsSync(sourcePath)) {
+      await fs.rename(sourcePath, targetPath);
+    }
+
+    // 2. Create .txt with metadata
+    const txtFileName = fileName.replace(/\.[^/.]+$/, "") + ".txt";
+    const txtPath = path.join(APROVADOS_DIR, txtFileName);
     
+    let metadataText = "--- METADADOS DO ARTIGO ---\n\n";
+    headers.forEach((header, index) => {
+      const value = row[index] !== undefined ? row[index] : "";
+      metadataText += `${header}: ${value}\n`;
+    });
+
+    await fs.writeFile(txtPath, metadataText, "utf8");
+
+    // 3. Update Excel status
     const aprovIndex = headers.indexOf("APROVAÇÃO MANUAL");
     if (aprovIndex !== -1) {
       allData[rowNumber - 1][aprovIndex] = "TRUE";
@@ -891,7 +926,7 @@ async function aprovarManualmenteLocal(rowNumber, fileName) {
 
     return {
       success: true,
-      message: `Artigo da linha ${rowNumber} aprovado manualmente e copiado localmente.`,
+      message: `Artigo ${fileName} aprovado, movido para 'aprovados' e metadados salvos em .txt.`,
     };
   } catch (error) {
     console.error(`Erro na aprovação manual da linha ${rowNumber}:`, error.message);
