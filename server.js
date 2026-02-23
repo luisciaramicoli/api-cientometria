@@ -21,7 +21,6 @@ const {
 } = require("./src/services/api_logic.js");
 const fs = require('fs').promises;
 const fsSync = require('fs');
-const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
 const { pool, initDb, saltRounds } = require("./src/services/database.js"); // Import saltRounds
