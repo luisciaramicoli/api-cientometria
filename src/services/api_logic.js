@@ -23,6 +23,26 @@ const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:8000";
   }
 });
 
+// --- HELPERS ---
+/**
+ * Tenta encontrar um arquivo PDF em várias pastas possíveis (raiz, aprovados, reprovados).
+ */
+function findFileInFolders(fileName) {
+  if (!fileName) return null;
+  const possiblePaths = [
+    path.join(DOCUMENTS_DIR, fileName),
+    path.join(APROVADOS_DIR, fileName),
+    path.join(REPROVADOS_DIR, fileName)
+  ];
+
+  for (const p of possiblePaths) {
+    if (fsSync.existsSync(p)) {
+      return p;
+    }
+  }
+  return null;
+}
+
 // --- LOCAL DATA HELPERS ---
 function readWorkbook() {
   console.log(`  > readWorkbook: checking if file exists at ${CONSOLIDADO_PATH}`);
@@ -200,13 +220,11 @@ async function processarUmaLinha(
     return { success: false, updatedRow: row };
   }
 
-  const filePath = path.isAbsolute(fileName) 
-    ? fileName 
-    : path.join(DOCUMENTS_DIR, fileName);
+  const filePath = findFileInFolders(fileName);
 
   try {
-    if (!fsSync.existsSync(filePath)) {
-      throw new Error(`Arquivo não encontrado localmente: ${filePath}`);
+    if (!filePath) {
+      throw new Error(`Arquivo não encontrado em nenhuma das pastas: ${fileName}`);
     }
 
     const pdfBuffer = await fs.readFile(filePath);
@@ -214,16 +232,19 @@ async function processarUmaLinha(
     // Identifica a categoria da coluna AJ (índice 35) ou pelo header "CATEGORIA"
     let colCategoriaIndex = headers.indexOf("CATEGORIA");
     if (colCategoriaIndex === -1) colCategoriaIndex = 35; // Fallback para AJ
-    const categoryValue = row[colCategoriaIndex] || null;
+    const originalCategory = row[colCategoriaIndex] || "";
 
     const extractedData = await callCustomCuradorApi(
       pdfBuffer,
       llmOutputHeaders,
-      categoryValue
+      originalCategory
     );
 
     // Prepare data for updating LLM output columns in the local row object
     llmOutputHeaders.forEach((header) => {
+      // JAMAIS sobrescrever a categoria durante a curadoria
+      if (header === "CATEGORIA") return;
+
       const value =
         extractedData[header] !== undefined ? extractedData[header] : "N/A";
       const headerIndex = headers.indexOf(header);
@@ -231,6 +252,9 @@ async function processarUmaLinha(
         row[headerIndex] = value;
       }
     });
+
+    // Garantir que a categoria original seja mantida
+    row[colCategoriaIndex] = originalCategory;
 
     const boolAprovado = normalizarBooleano(
       extractedData["APROVAÇÃO CURADOR (marcar)"] || extractedData["aprovacao"],
@@ -430,12 +454,10 @@ async function executarCategorizacaoLinhaUnica(rowNumber) {
   const fileName = row[colUrlDocumentoIndex] || "";
   if (!fileName) throw new Error("Este artigo não possui um documento local para categorização.");
 
-  const filePath = path.isAbsolute(fileName) 
-    ? fileName 
-    : path.join(DOCUMENTS_DIR, fileName);
+  const filePath = findFileInFolders(fileName);
 
-  if (!fsSync.existsSync(filePath)) {
-    throw new Error(`Arquivo não encontrado localmente: ${filePath}`);
+  if (!filePath) {
+    throw new Error(`Arquivo não encontrado em nenhuma das pastas: ${fileName}`);
   }
 
   const pdfBuffer = await fs.readFile(filePath);
@@ -553,11 +575,61 @@ async function processLocalFolderForBatchInsert(folderPath) {
 
 async function getCuratedArticles() {
   console.log("  > getCuratedArticles: reading local data...");
-  const allData = await getLocalData();
+  const wb = readWorkbook();
+  const ws = wb.Sheets[SHEET_NAME];
+  const allData = xlsx.utils.sheet_to_json(ws, { header: 1 });
+  
   console.log(`  > getCuratedArticles: ${allData.length} rows found.`);
   if (allData.length < 2) return [];
-  const [headers, ...rows] = allData;
-  console.log(`  > getCuratedArticles: headers: ${headers.slice(0, 5).join(", ")}...`);
+  const headers = allData[0];
+  
+  let colCategoriaIndex = headers.indexOf("CATEGORIA");
+  if (colCategoriaIndex === -1) colCategoriaIndex = 35;
+  const colUrlDocumentoIndex = headers.indexOf("URL DO DOCUMENTO");
+
+  const allowedCategories = [
+    "BIOINSSUMOS",
+    "MANEJO ECOFISIOLÓGICO E NUTRICIONAL DA CITRICULTURA DE ALTA PERFORMANCE"
+  ];
+
+  let modified = false;
+  let repairedCount = 0;
+
+  // Percorrer os dados para validar categorias
+  for (let i = 1; i < allData.length; i++) {
+    const row = allData[i];
+    let category = String(row[colCategoriaIndex] || "").trim();
+
+    if (!allowedCategories.includes(category) && repairedCount < 10) {
+      const fileName = row[colUrlDocumentoIndex];
+      const filePath = findFileInFolders(fileName);
+      
+      if (filePath) {
+        console.log(`  > Reparando categoria inválida ('${category}') na linha ${i + 1}...`);
+        try {
+          const pdfBuffer = await fs.readFile(filePath);
+          const newCategory = await callCategorizationApi(pdfBuffer);
+          if (newCategory) {
+            allData[i][colCategoriaIndex] = newCategory;
+            modified = true;
+            repairedCount++;
+            console.log(`    ➜ Nova categoria: ${newCategory}`);
+          }
+        } catch (e) {
+          console.error(`    ➜ Erro ao reparar linha ${i+1}: ${e.message}`);
+        }
+      }
+    }
+  }
+
+  if (modified) {
+    const newWs = xlsx.utils.aoa_to_sheet(allData);
+    wb.Sheets[SHEET_NAME] = newWs;
+    writeWorkbook(wb);
+  }
+
+  // Retornar os dados mapeados como objetos
+  const [, ...rows] = allData;
   return rows.map((row, index) => {
     const article = { __row_number: index + 2 };
     headers.forEach((header, i) => {
