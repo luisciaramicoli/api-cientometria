@@ -20,6 +20,7 @@ const {
 const fs = require('fs').promises;
 const fsSync = require('fs');
 const path = require('path');
+const os = require('os');
 const { pool, initDb, saltRounds } = require("./src/services/database.js"); // Import saltRounds
 const { extractMetadata } = require("./src/controllers/metadata_controller.js"); // Importar o novo controller
 const multer = require("multer"); // Importar multer
@@ -537,12 +538,27 @@ app.get("/api/test-no-auth", async (req, res) => {
 
 // --- SERVER START ---
 
-app.listen(port, () => {
-  console.log("--- Node.js Express Server Starting ---");
-  console.log(`Listening on http://127.0.0.1:${port}`);
-  console.log(
-    "Servidor pronto. Usando banco de dados TiDB para autenticação.",
-  );
+app.listen(port, "0.0.0.0", () => {
+  const networkInterfaces = os.networkInterfaces();
+  let networkUrl = "";
+
+  for (const interfaceName in networkInterfaces) {
+    for (const iface of networkInterfaces[interfaceName]) {
+      // No Node.js 18+, 'family' pode ser 'IPv4' ou 4.
+      if ((iface.family === "IPv4" || iface.family === 4) && !iface.internal) {
+        networkUrl = `http://${iface.address}:${port}`;
+        break;
+      }
+    }
+    if (networkUrl) break;
+  }
+
+  console.log("\n  API SERVER READY");
+  console.log(`  ➜  Local:   http://localhost:${port}/`);
+  if (networkUrl) {
+    console.log(`  ➜  Network: ${networkUrl}/`);
+  }
+  console.log("\n  Servidor pronto. Usando banco de dados TiDB para autenticação.\n");
 });
 
 // Exportar o app para compatibilidade correta com Vercel
