@@ -1,6 +1,14 @@
 const express = require("express");
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+const fsSync = require('fs');
+
+// Tenta carregar o .env de vários locais possíveis para garantir funcionamento no servidor
+const envPath = fsSync.existsSync(path.join(__dirname, '.env')) 
+  ? path.join(__dirname, '.env')
+  : path.join(process.cwd(), '.env');
+
+require('dotenv').config({ path: envPath });
+
 const bodyParser = require("body-parser");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
@@ -577,8 +585,13 @@ app.listen(port, "0.0.0.0", () => {
 
   console.log("\n  API SERVER READY");
   console.log(`  ➜  Local:   http://localhost:${port}/`);
-  if (networkUrl) {
-    console.log(`  ➜  Network: ${networkUrl}/`);
+  
+  const displayNetworkUrl = process.env.NETWORK_IP 
+    ? `http://${process.env.NETWORK_IP}:${port}` 
+    : networkUrl;
+
+  if (displayNetworkUrl) {
+    console.log(`  ➜  Network: ${displayNetworkUrl}/`);
   }
   console.log("\n  Servidor pronto. Usando banco de dados TiDB para autenticação.\n");
 });
