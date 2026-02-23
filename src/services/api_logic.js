@@ -1013,6 +1013,7 @@ module.exports = {
   executarCuradoriaLocalmente,
   executarCuradoriaLinhaUnica,
   executarCategorizacaoLinhaUnica,
+  findFileInFolders,
   deleteRow,
   deleteUnavailableRows,
   manualInsert,

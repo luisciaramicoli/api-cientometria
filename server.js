@@ -23,6 +23,7 @@ const {
   executarCuradoriaLocalmente,
   executarCuradoriaLinhaUnica,
   executarCategorizacaoLinhaUnica,
+  findFileInFolders,
   deleteRow,
   deleteUnavailableRows,
   manualInsert,
@@ -120,8 +121,18 @@ const authorizeAdmin = (req, res, next) => {
 
 // --- API ROUTES ---
 
-// Servir arquivos estáticos da pasta de documentos
-app.use("/documents", express.static(path.join(__dirname, "documents")));
+// Rota dinâmica para servir documentos buscando em múltiplas pastas (raiz, aprovados, reprovados)
+app.get("/documents/:filename", (req, res) => {
+  const { filename } = req.params;
+  const filePath = findFileInFolders(filename);
+
+  if (filePath) {
+    res.sendFile(filePath);
+  } else {
+    console.error(`[404] Arquivo não encontrado: ${filename}`);
+    res.status(404).send("Arquivo não encontrado.");
+  }
+});
 
 app.get("/", (req, res) => {
   res.send("Node.js API server is running. Use /api/login para autenticar.");
