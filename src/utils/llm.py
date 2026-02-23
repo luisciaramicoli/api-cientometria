@@ -180,7 +180,7 @@ async def curar_documento(payload: PDFPayload):
     schema_str = json.dumps(json_skeleton, indent=2)
 
     # 6. Prompt Engineering (System + User)
-    if payload.category == "BIOINSSUMOS":
+    if payload.category == "BIOINSUMOS":
         system_prompt = f"""Você é um assistente especializado em extração de metadados e curadoria científica de BIOINSUMOS (insumos de origem biológica na agricultura).
 Sua Tarefa Principal: Extrair todos os metadados solicitados do texto fornecido e preencher o esquema JSON.
 
@@ -308,7 +308,7 @@ async def categorize_article(payload: PDFPayload):
     Retorne APENAS o nome da categoria.
 
     Categorias disponíveis:
-    - BIOINSSUMOS
+    - BIOINSUMOS
     - MANEJO ECOFISIOLÓGICO E NUTRICIONAL DA CITRICULTURA DE ALTA PERFORMANCE
 
     Se o artigo abordar ambos os temas, escolha a categoria que for mais proeminente no texto.
@@ -316,7 +316,7 @@ async def categorize_article(payload: PDFPayload):
     """
 
     user_prompt = f"""
-    Classifique o seguinte artigo em uma das categorias: BIOINSSUMOS ou MANEJO ECOFISIOLÓGICO E NUTRICIONAL DA CITRICULTURA DE ALTA PERFORMANCE.
+    Classifique o seguinte artigo em uma das categorias: BIOINSUMOS ou MANEJO ECOFISIOLÓGICO E NUTRICIONAL DA CITRICULTURA DE ALTA PERFORMANCE.
 
     '''
     {document_text[:7000]}
@@ -339,8 +339,8 @@ async def categorize_article(payload: PDFPayload):
         category = completion.choices[0].message.content.strip()
 
         # Validate the category
-        if category not in ["BIOINSSUMOS", "MANEJO ECOFISIOLÓGICO E NUTRICIONAL DA CITRICULTURA DE ALTA PERFORMANCE"]:
-            category = "BIOINSSUMOS" # Default to BIOINSSUMOS if unexpected
+        if category not in ["BIOINSUMOS", "MANEJO ECOFISIOLÓGICO E NUTRICIONAL DA CITRICULTURA DE ALTA PERFORMANCE"]:
+            category = "BIOINSUMOS" # Default to BIOINSUMOS if unexpected
 
         return {"category": category}
 

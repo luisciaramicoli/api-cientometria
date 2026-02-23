@@ -588,7 +588,7 @@ async function getCuratedArticles() {
   const colUrlDocumentoIndex = headers.indexOf("URL DO DOCUMENTO");
 
   const allowedCategories = [
-    "BIOINSSUMOS",
+    "BIOINSUMOS",
     "MANEJO ECOFISIOLÓGICO E NUTRICIONAL DA CITRICULTURA DE ALTA PERFORMANCE"
   ];
 
