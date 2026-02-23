@@ -1,5 +1,6 @@
 const express = require("express");
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const bodyParser = require("body-parser");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
@@ -549,7 +550,7 @@ app.get("/api/test-no-auth", async (req, res) => {
 app.listen(port, "0.0.0.0", () => {
   // Start the local LLM server (FastAPI) in background
   console.log("Iniciando servidor LLM local (FastAPI)...");
-  const llmServer = spawn('uvicorn', ['src.utils.llm:app', '--host', '0.0.0.0', '--port', '8000'], {
+  const llmServer = spawn('python3', ['-m', 'uvicorn', 'src.utils.llm:app', '--host', '0.0.0.0', '--port', '8000'], {
     stdio: 'inherit',
     env: process.env,
     shell: true
