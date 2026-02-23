@@ -1,6 +1,9 @@
 const express = require("express");
 const path = require('path');
 const fsSync = require('fs');
+const fs = require('fs').promises;
+const os = require('os');
+const { spawn } = require('child_process');
 
 // Tenta carregar o .env de vários locais possíveis para garantir funcionamento no servidor
 const envPath = fsSync.existsSync(path.join(__dirname, '.env')) 
@@ -27,10 +30,6 @@ const {
   processDriveFolderForBatchInsert,
   uploadFileToDrive,
 } = require("./src/services/api_logic.js");
-const fs = require('fs').promises;
-const fsSync = require('fs');
-const os = require('os');
-const { spawn } = require('child_process');
 const { pool, initDb, saltRounds } = require("./src/services/database.js"); // Import saltRounds
 const { extractMetadata } = require("./src/controllers/metadata_controller.js"); // Importar o novo controller
 const multer = require("multer"); // Importar multer
