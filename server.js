@@ -41,7 +41,13 @@ const JWT_SECRET = process.env.JWT_SECRET || "sua-chave-secreta-super-dificil-de
 initDb();
 
 app.use(bodyParser.json());
-app.use(cors());
+
+// Configuração explícita do CORS para permitir acesso externo
+app.use(cors({
+  origin: "*", // Permite todas as origens (ideal para dev e servidor externo)
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 
 // Middleware para Log de todas as requisições (ajuda no debug do Vercel)
 app.use((req, res, next) => {
