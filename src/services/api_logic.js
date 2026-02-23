@@ -100,8 +100,8 @@ async function callCustomCuradorApi(pdfBuffer, headers, category = null) {
     const msg = error.response
       ? JSON.stringify(error.response.data)
       : error.message;
-    console.error("HuggingFace API Error:", msg);
-    throw new Error("Erro na API HuggingFace: " + msg);
+    console.error("LLM API Error:", msg);
+    throw new Error("Erro na API do LLM: " + msg);
   }
 }
 
