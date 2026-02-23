@@ -816,18 +816,18 @@ async function manualInsert(data) {
   const allData = xlsx.utils.sheet_to_json(ws, { header: 1 });
   const headers = allData[0] || [];
 
-  const isAlreadyPresent = await isDuplicateLocal(allData, headers, data.DOI, data.Titulo);
+  const isAlreadyPresent = await isDuplicateLocal(allData, headers, data.DOI, data["Título"]);
   if (isAlreadyPresent) {
     return {
       status: "error",
-      message: `Erro: O documento '${data.Titulo}' já está cadastrado na planilha local e não pode ser inserido novamente.`,
+      message: `Erro: O documento '${data["Título"]}' já está cadastrado na planilha local e não pode ser inserido novamente.`,
     };
   }
 
   const rowToUpload = {
     "Autor(es)": data["Autor(es)"],
-    "Título": data.Titulo,
-    "Subtítulo": data.Subtítulo,
+    "Título": data["Título"],
+    "Subtítulo": data["Subtítulo"],
     "Ano": data.Ano,
     "Número de citações recebidas (Google Scholar)":
       data["Número de citações recebidas (Google Scholar)"],
