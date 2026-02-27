@@ -43,7 +43,28 @@ const upload = multer({ storage: storage });
 
 
 const app = express();
-const port = 5001;
+// allow the port to be overridden (useful for dev vs prod)
+const port = process.env.PORT || 5001;
+
+// Helper to compute network base URL (http://<ip>:<port>)
+function computeNetworkBaseUrl() {
+  if (process.env.NETWORK_IP) {
+    return `http://${process.env.NETWORK_IP}:${port}`;
+  }
+  const networkInterfaces = os.networkInterfaces();
+  for (const interfaceName in networkInterfaces) {
+    for (const iface of networkInterfaces[interfaceName]) {
+      if ((iface.family === 'IPv4' || iface.family === 4) && !iface.internal) {
+        return `http://${iface.address}:${port}`;
+      }
+    }
+  }
+  return `http://localhost:${port}`;
+}
+
+// store initial base URL (will be refreshed on server start)
+app.locals.baseNetworkUrl = computeNetworkBaseUrl();
+
 
 
 // Em um app real, use uma variável de ambiente (process.env.JWT_SECRET)
@@ -58,14 +79,47 @@ app.use(bodyParser.json());
 app.use(cors({
   origin: "*", // Permite todas as origens (ideal para dev e servidor externo)
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
 }));
+
+// Middleware para permitir recursos externos
+app.use((req, res, next) => {
+  // Permitir CORS para todas as origens
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Type, Authorization');
+  
+  // Headers de segurança básicos (sem bloquear recursos)
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  
+  next();
+});
 
 // Middleware para Log de todas as requisições (ajuda no debug do Vercel)
 app.use((req, res, next) => {
   console.log(`[API CALL] ${req.method} ${req.url}`);
   next();
 });
+
+// Se existir uma build do front-end (agora em frontend/dist), servir os arquivos estáticos
+const frontendBuildPath = path.join(__dirname, '../frontend/dist');
+if (fsSync.existsSync(frontendBuildPath)) {
+  console.log(`> Servindo frontend estático de ${frontendBuildPath}`);
+  // servir sem cache para evitar antigos conteúdos em browsers
+  app.use(express.static(frontendBuildPath, { maxAge: 0, setHeaders: (res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }}));
+  // Qualquer rota não-API deve retornar index.html para roteamento do React
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(frontendBuildPath, 'index.html'));
+  });
+}
 
 // --- AUTH MIDDLEWARE ---
 
@@ -145,6 +199,12 @@ app.get("/api/health", (req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
+// Rota que retorna a URL base de rede que o backend está usando (útil para o frontend montar links)
+app.get('/api/base-url', (req, res) => {
+  const base = app.locals.baseNetworkUrl || `http://localhost:${port}`;
+  res.json({ baseUrl: base });
+});
+
 // --- Rota de Login ---
 app.post("/api/login", async (req, res) => {
   const { username, password } = req.body;
@@ -191,17 +251,17 @@ app.post("/api/register", authenticateToken, authorizeAdmin, async (req, res) =>
   }
 
   // Validação simples de role
-  const validRoles = ['admin', 'cientometria', 'curadoria_boaretto', 'curadoria_bonetti'];
+  const validRoles = ['admin', 'cientometria', 'curadoria_citros_cana', 'curadoria_solos'];
   if (!validRoles.includes(role)) {
     return res.status(400).json({ error: `Role inválida. Roles permitidas: ${validRoles.join(', ')}.` });
   }
 
   // Atribuição automática de categorias baseada no Role
   let allowedCategories = null;
-  if (role === 'curadoria_boaretto') {
-    allowedCategories = JSON.stringify(["MANEJO ECOFISIOLÓGICO E NUTRICIONAL DA CITRICULTURA DE ALTA PERFORMANCE"]);
-  } else if (role === 'curadoria_bonetti') {
-    allowedCategories = JSON.stringify(["BIOINSUMOS"]);
+  if (role === 'curadoria_citros_cana') {
+    allowedCategories = JSON.stringify(["citros e cana"]);
+  } else if (role === 'curadoria_solos') {
+    allowedCategories = JSON.stringify(["solos"]);
   }
 
   try {
@@ -403,7 +463,8 @@ app.post("/api/save", authenticateToken, async (req, res) => {
       return res.status(400).json({ error: "No rows selected to save." });
     }
 
-    const result = await saveData(selected_rows);
+    const username = req.user ? req.user.username : "Desconhecido";
+    const result = await saveData(selected_rows, username);
     res.json(result);
   } catch (error) {
     console.error(`Error in /api/save: ${error.message}`);
@@ -457,7 +518,11 @@ app.post("/api/manual-insert", authenticateToken, upload.single('file'), async (
 
       try {
         const localFileName = await uploadFileToDrive(null, tmpPath, originalName);
-        if (localFileName) data.pub_url = localFileName;
+          if (localFileName) {
+            const base = app.locals.baseNetworkUrl || `http://localhost:${port}`;
+            // ensure filename is safely encoded in URL
+            data.pub_url = `${base}/documents/${encodeURIComponent(localFileName)}`;
+          }
       } catch (e) {
         console.error('Error saving file locally:', e.message);
       } finally {
@@ -505,7 +570,8 @@ app.post("/api/manual-insert", authenticateToken, upload.single('file'), async (
       }
     }
 
-    const result = await manualInsert(finalData);
+    const username = req.user ? req.user.username : "Desconhecido";
+    const result = await manualInsert(finalData, username);
 
     if (result.status === "success") {
       res.status(201).json(result); // 201 Created
@@ -526,7 +592,8 @@ app.post("/api/manual-approval", authenticateToken, async (req, res) => {
             return res.status(400).json({ error: "Parâmetros 'row_number' e 'fileName' são obrigatórios." });
         }
 
-        const result = await aprovarManualmente(parseInt(row_number, 10), fileName);
+        const username = req.user ? req.user.username : "Desconhecido";
+        const result = await aprovarManualmente(parseInt(row_number, 10), fileName, username);
         res.json(result);
     } catch (error) {
         console.error(`Error in /api/manual-approval: ${error.message}`);
@@ -542,7 +609,8 @@ app.post("/api/manual-rejection", authenticateToken, async (req, res) => {
             return res.status(400).json({ error: "Parâmetros 'row_number' e 'fileName' são obrigatórios." });
         }
 
-        const result = await reprovarManualmente(parseInt(row_number, 10), fileName);
+        const username = req.user ? req.user.username : "Desconhecido";
+        const result = await reprovarManualmente(parseInt(row_number, 10), fileName, username);
         res.json(result);
     } catch (error) {
         console.error(`Error in /api/manual-rejection: ${error.message}`);
@@ -556,7 +624,8 @@ app.post("/api/batch-upload-zip", authenticateToken, upload.single('file'), asyn
             return res.status(400).json({ error: "Nenhum arquivo ZIP foi enviado." });
         }
 
-        const result = await processZipUpload(req.file.buffer);
+        const username = req.user ? req.user.username : "Desconhecido";
+        const result = await processZipUpload(req.file.buffer, username);
         res.json(result);
     } catch (error) {
         console.error(`Error in /api/batch-upload-zip: ${error.message}`);
@@ -571,7 +640,8 @@ app.post("/api/batch-process-local-folder", authenticateToken, async (req, res) 
       return res.status(400).json({ error: "O 'folder_path' é obrigatório." });
     }
 
-    const result = await processDriveFolderForBatchInsert(folder_path);
+    const username = req.user ? req.user.username : "Desconhecido";
+    const result = await processDriveFolderForBatchInsert(folder_path, username);
     res.json(result);
   } catch (error) {
     console.error(`Error in /api/batch-process-local-folder: ${error.message}`);
@@ -652,6 +722,9 @@ app.listen(port, "0.0.0.0", () => {
   const displayNetworkUrl = process.env.NETWORK_IP 
     ? `http://${process.env.NETWORK_IP}:${port}` 
     : networkUrl;
+
+  // refresh app.locals.baseNetworkUrl so runtime handlers can build absolute URLs
+  app.locals.baseNetworkUrl = displayNetworkUrl || `http://localhost:${port}`;
 
   if (displayNetworkUrl) {
     console.log(`  ➜  Network: ${displayNetworkUrl}/`);

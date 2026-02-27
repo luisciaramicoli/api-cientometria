@@ -483,7 +483,8 @@ async function executarCategorizacaoLinhaUnica(rowNumber) {
   };
 }
 
-async function processLocalFolderForBatchInsert(folderPath) {
+async function processLocalFolderForBatchInsert(folderPath, username = "Desconhecido") {
+  console.log(`  > processLocalFolderForBatchInsert: Scanning folder ${folderPath}`);
   const wb = readWorkbook();
   const ws = wb.Sheets[SHEET_NAME];
   const allData = xlsx.utils.sheet_to_json(ws, { header: 1 });
@@ -495,37 +496,74 @@ async function processLocalFolderForBatchInsert(folderPath) {
     ? folderPath 
     : path.join(__dirname, "../../", folderPath);
 
+  console.log(`  > Absolute path: ${absoluteFolderPath}`);
   if (!fsSync.existsSync(absoluteFolderPath)) {
+    console.error(`  > Folder NOT FOUND: ${absoluteFolderPath}`);
     throw new Error(`Pasta não encontrada: ${absoluteFolderPath}`);
   }
 
   const pdfFiles = await listPdfsInLocalFolder(absoluteFolderPath);
+  console.log(`  > Found ${pdfFiles.length} PDF files in root of extracted folder.`);
+  
+  // Se não encontrar PDFs na raiz, tenta buscar recursivamente uma pasta adentro
+  if (pdfFiles.length === 0) {
+    console.log("  > Searching for PDFs in subdirectories...");
+    const subDirs = (await fs.readdir(absoluteFolderPath, { withFileTypes: true }))
+      .filter(dirent => dirent.isDirectory())
+      .map(dirent => dirent.name);
+    
+    for (const subDir of subDirs) {
+        const subPath = path.join(absoluteFolderPath, subDir);
+        const subPdfs = await listPdfsInLocalFolder(subPath);
+        if (subPdfs.length > 0) {
+            console.log(`  > Found ${subPdfs.length} PDFs in subfolder: ${subDir}`);
+            pdfFiles.push(...subPdfs);
+        }
+    }
+  }
+
   if (!pdfFiles || pdfFiles.length === 0) {
+    console.log("  > No PDF files found to process.");
     return { message: "Nenhum arquivo PDF encontrado na pasta local." };
   }
 
-  const articlesToUpload = [];
+  console.log(`  > Total PDFs to process: ${pdfFiles.length}`);
   let processedCount = 0;
   let errorCount = 0;
   let skippedCount = 0;
 
   for (const file of pdfFiles) {
     try {
+      // Pequeno delay para evitar Rate Limit (429) da Groq
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      console.log(`  > Processing [${processedCount + errorCount + skippedCount + 1}/${pdfFiles.length}]: ${file.name}`);
+      
+      // Reload workbook/allData to have the latest state for duplicate check
+      const currentWb = readWorkbook();
+      const currentWs = currentWb.Sheets[SHEET_NAME];
+      const currentData = xlsx.utils.sheet_to_json(currentWs, { header: 1 });
+      const currentHeaders = currentData[0] || [];
+
       const fileNameTitle = file.name.replace(/\.pdf$/i, "");
-      const duplicate = await isDuplicateLocal(allData, headers, null, fileNameTitle);
+      const duplicate = await isDuplicateLocal(currentData, currentHeaders, null, fileNameTitle);
       if (duplicate) {
-        console.log(`Skipping duplicate file: ${file.name}`);
+        console.log(`    ➜ Skipping duplicate file: ${file.name}`);
         skippedCount++;
         continue;
       }
 
       const pdfBuffer = await getLocalPdfContent(file.localPath);
+      
+      console.log("    ➜ Calling Categorization API...");
       const category = await callCategorizationApi(pdfBuffer);
+      
+      console.log("    ➜ Calling Custom Curador API (Extraction)...");
       const extractedMetadata = await callCustomCuradorApi(pdfBuffer, ALL_METADATA_FIELDS);
 
-      const fullDuplicate = await isDuplicateLocal(allData, headers, extractedMetadata["DOI"], extractedMetadata["Titulo"] || extractedMetadata["Título"]);
+      const fullDuplicate = await isDuplicateLocal(currentData, currentHeaders, extractedMetadata["DOI"], extractedMetadata["Titulo"] || extractedMetadata["Título"]);
       if (fullDuplicate) {
-        console.log(`Skipping duplicate after metadata extraction: ${extractedMetadata["Titulo"]}`);
+        console.log(`    ➜ Skipping duplicate after metadata extraction: ${extractedMetadata["Titulo"]}`);
         skippedCount++;
         continue;
       }
@@ -543,36 +581,27 @@ async function processLocalFolderForBatchInsert(folderPath) {
       rowData["CATEGORIA"] = category;
       rowData["URL DO DOCUMENTO"] = file.name; // Store relative path/filename
       rowData["Título"] = extractedMetadata["Titulo"] || file.name.replace(/\.pdf$/i, '');
+      rowData["INSERIDO POR"] = username;
 
-      articlesToUpload.push(rowData);
+      // SALVAMENTO INCREMENTAL: Salva este artigo IMEDIATAMENTE
+      console.log(`    ➜ Saving [${file.name}] to spreadsheet...`);
+      await uploadToLocalSheet(currentWb, currentData, currentHeaders, [rowData]);
+      
       processedCount++;
+      console.log(`    ➜ Success! Progress: ${processedCount} saved.`);
 
     } catch (e) {
-      console.error(`Error processing file ${file.name}: ${e.message}`);
+      console.error(`    ➜ ERROR processing file ${file.name}: ${e.message}`);
       errorCount++;
     }
   }
 
-  if (articlesToUpload.length > 0) {
-    const success = await uploadToLocalSheet(wb, allData, headers, articlesToUpload);
-    if (success) {
-      return {
-        message: `Processamento em lote concluído. Total: ${pdfFiles.length}, Processados com sucesso: ${processedCount}, Com erros: ${errorCount}, Duplicados: ${skippedCount}. Dados inseridos na planilha local.`,
-        processedCount,
-        errorCount,
-        skippedCount,
-      };
-    } else {
-      throw new Error("Falha ao inserir os dados na planilha local.");
-    }
-  } else {
-    return {
-      message: `Processamento em lote concluído. Total: ${pdfFiles.length}, Nenhum artigo novo inserido (Poderiam ser duplicatas: ${skippedCount}).`,
-      processedCount,
-      errorCount,
-      skippedCount,
-    };
-  }
+  return {
+    message: `Processamento em lote concluído. Total: ${pdfFiles.length}, Processados e salvos: ${processedCount}, Com erros: ${errorCount}, Duplicados: ${skippedCount}.`,
+    processedCount,
+    errorCount,
+    skippedCount,
+  };
 }
 
 async function getCuratedArticles() {
@@ -590,9 +619,16 @@ async function getCuratedArticles() {
   const colUrlDocumentoIndex = headers.indexOf("URL DO DOCUMENTO");
 
   const allowedCategories = [
-    "BIOINSUMOS",
-    "MANEJO ECOFISIOLÓGICO E NUTRICIONAL DA CITRICULTURA DE ALTA PERFORMANCE"
+    "solos",
+    "citros e cana"
   ];
+
+  // Mapeamento de categorias antigas para novas
+  const categoryMapping = {
+    "MANEJO DE NUTRIENTES E AGUA": "citros e cana",
+    "BIOINSUMOS": "solos",
+    "MANEJO ECOFISIOLÓGICO E NUTRICIONAL DA CITRICULTURA DE ALTA PERFORMANCE": "citros e cana"
+  };
 
   let modified = false;
   let repairedCount = 0;
@@ -602,20 +638,31 @@ async function getCuratedArticles() {
     const row = allData[i];
     let category = String(row[colCategoriaIndex] || "").trim();
 
-    // Se a categoria for "MANEJO DE NUTRIENTES E AGUA", é uma categoria antiga que precisa ser atualizada
-    // Mas se o serviço de categorização estiver fora, não queremos ficar tentando infinitamente se já sabemos que falhou
-    const isOldCategory = category === "MANEJO DE NUTRIENTES E AGUA";
+    // Verificar se é categoria antiga ou inválida
+    const isOldCategory = Object.keys(categoryMapping).includes(category);
+    const isInvalid = !allowedCategories.includes(category) && category !== "";
 
-    if (!allowedCategories.includes(category) && repairedCount < 10) {
+    if ((isOldCategory || isInvalid) && repairedCount < 10) {
       const fileName = row[colUrlDocumentoIndex];
       const filePath = findFileInFolders(fileName);
       
-      if (filePath) {
+      // Se houver mapeamento direto, aplicar primeiro
+      if (categoryMapping[category]) {
+        console.log(`  > Mapeando categoria antiga ('${category}') na linha ${i + 1}...`);
+        allData[i][colCategoriaIndex] = categoryMapping[category];
+        modified = true;
+        repairedCount++;
+        console.log(`    ➜ Nova categoria: ${categoryMapping[category]}`);
+        continue;
+      }
+      
+      // Se não há mapeamento e arquivo existe, tentar API
+      if (filePath && isInvalid) {
         console.log(`  > Reparando categoria inválida ('${category}') na linha ${i + 1}...`);
         try {
           const pdfBuffer = await fs.readFile(filePath);
           const newCategory = await callCategorizationApi(pdfBuffer);
-          if (newCategory) {
+          if (newCategory && allowedCategories.includes(newCategory)) {
             allData[i][colCategoriaIndex] = newCategory;
             modified = true;
             repairedCount++;
@@ -623,9 +670,7 @@ async function getCuratedArticles() {
           }
         } catch (e) {
           console.error(`    ➜ Erro ao reparar linha ${i+1}: ${e.message}`);
-          // Se falhou e é a categoria problematica, podemos marcar de alguma forma para não tentar de novo nesta execução
-          // ou apenas aceitar que o log vai mostrar o erro.
-          // Como estamos em um loop de leitura, não queremos travar tudo.
+          // Deixar para tentar novamente depois
         }
       }
     }
@@ -743,7 +788,7 @@ async function isDuplicateLocal(allData, headers, doi, title) {
   return false;
 }
 
-async function saveData(selectedRows) {
+async function saveData(selectedRows, username = "Desconhecido") {
   const wb = readWorkbook();
   const ws = wb.Sheets[SHEET_NAME];
   const allData = xlsx.utils.sheet_to_json(ws, { header: 1 });
@@ -783,6 +828,7 @@ async function saveData(selectedRows) {
     finalDataToUpload.push({
       ...rowData,
       "URL DO DOCUMENTO": localFileName,
+      "INSERIDO POR": username,
     });
   }
 
@@ -819,7 +865,7 @@ async function uploadToLocalSheet(wb, allData, headers, data) {
   }
 }
 
-async function manualInsert(data) {
+async function manualInsert(data, username = "Desconhecido") {
   const wb = readWorkbook();
   const ws = wb.Sheets[SHEET_NAME];
   const allData = xlsx.utils.sheet_to_json(ws, { header: 1 });
@@ -831,6 +877,13 @@ async function manualInsert(data) {
       status: "error",
       message: `Erro: O documento '${data["Título"]}' já está cadastrado na planilha local e não pode ser inserido novamente.`,
     };
+  }
+
+  // Ensure INSERIDO POR header exists
+  let insertedByIndex = headers.indexOf("INSERIDO POR");
+  if (insertedByIndex === -1) {
+    headers.push("INSERIDO POR");
+    insertedByIndex = headers.length - 1;
   }
 
   const rowToUpload = {
@@ -868,6 +921,7 @@ async function manualInsert(data) {
     "FEEDBACK DO CURADOR (escrever)": data["FEEDBACK DO CURADOR (escrever)"],
     "URL DO DOCUMENTO": data.pub_url,
     "work_id": data.id || `manual-${Date.now()}`,
+    "INSERIDO POR": username,
   };
 
   const success = await uploadToLocalSheet(wb, allData, headers, [rowToUpload]);
@@ -962,7 +1016,7 @@ async function deleteUnavailableRows() {
   };
 }
 
-async function aprovarManualmenteLocal(rowNumber, fileName) {
+async function aprovarManualmenteLocal(rowNumber, fileName, username = "Desconhecido") {
   if (!fileName) {
     throw new Error("O artigo não possui um arquivo local associado.");
   }
@@ -986,13 +1040,23 @@ async function aprovarManualmenteLocal(rowNumber, fileName) {
       await fs.rename(sourcePath, targetPath);
     }
 
+    // Ensure APROVADO POR header exists
+    let approvedByIndex = headers.indexOf("APROVADO POR");
+    if (approvedByIndex === -1) {
+      headers.push("APROVADO POR");
+      approvedByIndex = headers.length - 1;
+    }
+    
+    // Update row with username
+    allData[rowNumber - 1][approvedByIndex] = username;
+
     // 2. Create .txt with metadata
     const txtFileName = fileName.replace(/\.[^/.]+$/, "") + ".txt";
     const txtPath = path.join(APROVADOS_DIR, txtFileName);
     
     let metadataText = "--- METADADOS DO ARTIGO ---\n\n";
     headers.forEach((header, index) => {
-      const value = row[index] !== undefined ? row[index] : "";
+      const value = allData[rowNumber - 1][index] !== undefined ? allData[rowNumber - 1][index] : "";
       metadataText += `${header}: ${value}\n`;
     });
 
@@ -1013,7 +1077,7 @@ async function aprovarManualmenteLocal(rowNumber, fileName) {
 
     return {
       success: true,
-      message: `Artigo ${fileName} aprovado manualmente, movido para 'aprovados' e metadados salvos em .txt.`,
+      message: `Artigo ${fileName} aprovado manualmente por ${username}, movido para 'aprovados' e metadados salvos em .txt.`,
     };
   } catch (error) {
     console.error(`Erro na aprovação manual da linha ${rowNumber}:`, error.message);
@@ -1021,7 +1085,7 @@ async function aprovarManualmenteLocal(rowNumber, fileName) {
   }
 }
 
-async function reprovarManualmenteLocal(rowNumber, fileName) {
+async function reprovarManualmenteLocal(rowNumber, fileName, username = "Desconhecido") {
   if (!fileName) {
     throw new Error("O artigo não possui um arquivo local associado.");
   }
@@ -1045,13 +1109,23 @@ async function reprovarManualmenteLocal(rowNumber, fileName) {
       await fs.rename(sourcePath, targetPath);
     }
 
+    // Ensure APROVADO POR header exists (even for rejections, it records the evaluator)
+    let approvedByIndex = headers.indexOf("APROVADO POR");
+    if (approvedByIndex === -1) {
+      headers.push("APROVADO POR");
+      approvedByIndex = headers.length - 1;
+    }
+    
+    // Update row with username
+    allData[rowNumber - 1][approvedByIndex] = username;
+
     // 2. Create .txt with metadata
     const txtFileName = fileName.replace(/\.[^/.]+$/, "") + ".txt";
     const txtPath = path.join(REPROVADOS_DIR, txtFileName);
     
     let metadataText = "--- METADADOS DO ARTIGO ---\n\n";
     headers.forEach((header, index) => {
-      const value = row[index] !== undefined ? row[index] : "";
+      const value = allData[rowNumber - 1][index] !== undefined ? allData[rowNumber - 1][index] : "";
       metadataText += `${header}: ${value}\n`;
     });
 
@@ -1072,7 +1146,7 @@ async function reprovarManualmenteLocal(rowNumber, fileName) {
 
     return {
       success: true,
-      message: `Artigo ${fileName} rejeitado manualmente, movido para 'reprovados' e metadados salvos em .txt.`,
+      message: `Artigo ${fileName} rejeitado manualmente por ${username}, movido para 'reprovados' e metadados salvos em .txt.`,
     };
   } catch (error) {
     console.error(`Erro na rejeição manual da linha ${rowNumber}:`, error.message);
@@ -1080,20 +1154,22 @@ async function reprovarManualmenteLocal(rowNumber, fileName) {
   }
 }
 
-async function processZipUploadLocal(zipBuffer) {
+async function processZipUploadLocal(zipBuffer, username = "Desconhecido") {
   const tempDir = path.join(os.tmpdir(), `api-cientometria-zip-${Date.now()}`);
+  console.log(`  > Creating temp dir for ZIP extraction: ${tempDir}`);
   await fs.mkdir(tempDir, { recursive: true });
 
   try {
     const zip = new AdmZip(zipBuffer);
+    console.log("  > Extracting ZIP...");
     zip.extractAllTo(tempDir, true);
 
     // Chamar a lógica de processamento de pasta local, apontando para o tempDir
-    const result = await processLocalFolderForBatchInsert(tempDir);
+    const result = await processLocalFolderForBatchInsert(tempDir, username);
     
     return result;
   } catch (error) {
-    console.error("Erro ao processar upload de ZIP:", error.message);
+    console.error("  > Erro ao processar upload de ZIP:", error.message);
     throw new Error(`Falha ao processar arquivo ZIP: ${error.message}`);
   } finally {
     // Limpeza da pasta temporária após um tempo para garantir que os processos terminaram
@@ -1106,7 +1182,7 @@ async function processZipUploadLocal(zipBuffer) {
       } catch (e) {
         console.warn("Erro ao limpar pasta temporária:", e.message);
       }
-    }, 10000);
+    }, 30000); // 30 segundos para garantir processamento
   }
 }
 
